@@ -1,4 +1,5 @@
 use std::fs::File;
+use std::io::{BufReader, BufWriter};
 use std::ops::{Index, IndexMut};
 use std::path::Path;
 
@@ -51,11 +52,11 @@ impl Matrix {
     }
     pub fn load(file: &Path) -> Result<Self, Error> {
         let f = File::open(file)?;
-        Ok(bincode::deserialize_from(f)?)
+        Ok(bincode::deserialize_from(BufReader::new(f))?)
     }
     pub fn store(&self, file: &Path) -> Result<(), Error> {
         let f = File::create(file)?;
-        bincode::serialize_into(f, self)?;
+        bincode::serialize_into(BufWriter::new(f), self)?;
         Ok(())
     }
 }
