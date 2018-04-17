@@ -1,8 +1,31 @@
+use std::fs::File;
 use std::ops::{Index, IndexMut};
+use std::path::Path;
+
+use bincode;
+use failure::Error;
 
 use super::Element;
 
-#[derive(Clone, Debug, PartialEq)]
+pub struct Rows<'a> {
+    matrix: &'a Matrix,
+    pos: usize,
+}
+
+impl<'a> Iterator for Rows<'a> {
+    type Item = &'a [Element];
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.pos == self.matrix.height {
+            None
+        } else {
+            let start = self.matrix.width * self.pos;
+            self.pos += 1;
+            Some(&self.matrix.content[start .. start + self.matrix.width])
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Matrix {
     width: usize,
     height: usize,
@@ -13,12 +36,27 @@ impl Matrix {
     fn validate(&self) {
         assert_eq!(self.content.len(), self.width * self.height);
     }
-    fn sized(w: usize, h: usize) -> Self {
+    pub fn sized(w: usize, h: usize) -> Self {
         Self {
             width: w,
             height: h,
             content: vec![Element::default(); w * h],
         }
+    }
+    pub fn rows(&self) -> Rows {
+        Rows {
+            matrix: self,
+            pos: 0,
+        }
+    }
+    pub fn load(file: &Path) -> Result<Self, Error> {
+        let f = File::open(file)?;
+        Ok(bincode::deserialize_from(f)?)
+    }
+    pub fn store(&self, file: &Path) -> Result<(), Error> {
+        let f = File::create(file)?;
+        bincode::serialize_into(f, self)?;
+        Ok(())
     }
 }
 
