@@ -1,0 +1,3 @@
+sudo perf record -e cycles  -g ./target/release/measure big*
+perf report
+perf script | ../FlameGraph/stackcollapse-perf.pl | ../FlameGraph/flamegraph.pl  > fg.svg
