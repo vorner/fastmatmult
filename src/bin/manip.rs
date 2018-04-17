@@ -2,7 +2,6 @@ extern crate bincode;
 extern crate failure;
 extern crate fastmatmult;
 extern crate itertools;
-extern crate rand;
 #[macro_use]
 extern crate structopt;
 
@@ -11,7 +10,6 @@ use std::process;
 
 use failure::Error;
 use itertools::Itertools;
-use rand::Rng;
 use structopt::StructOpt;
 
 use fastmatmult::simple::Matrix;
@@ -39,13 +37,7 @@ struct Opts {
 }
 
 fn generate(width: usize, height: usize, file: &Path) -> Result<(), Error> {
-    let mut matrix = Matrix::sized(width, height);
-    let mut rng = rand::thread_rng();
-    for x in 0..width {
-        for y in 0..height {
-            matrix[(x, y)] = rng.gen_range(0., 10.);
-        }
-    }
+    let matrix = Matrix::random(width, height);
     matrix.store(file)?;
     Ok(())
 }

@@ -5,6 +5,7 @@ use std::path::Path;
 
 use bincode;
 use failure::Error;
+use rand::{self, Rng};
 
 use super::Element;
 
@@ -44,6 +45,16 @@ impl Matrix {
             content: vec![Element::default(); w * h],
         }
     }
+    pub fn random(w: usize, h: usize) -> Self {
+        let mut result = Self::sized(w, h);
+        let mut rng = rand::thread_rng();
+        for x in 0..w {
+            for y in 0..h {
+                result[(x, y)] = rng.gen_range(0., 10.);
+            }
+        }
+        result
+    }
     pub fn rows(&self) -> Rows {
         Rows {
             matrix: self,
@@ -59,6 +70,8 @@ impl Matrix {
         bincode::serialize_into(BufWriter::new(f), self)?;
         Ok(())
     }
+    pub fn height(&self) -> usize { self.height }
+    pub fn width(&self) -> usize { self.width }
 }
 
 impl Index<(usize, usize)> for Matrix {
