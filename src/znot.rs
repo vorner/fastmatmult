@@ -1,74 +1,73 @@
+use typenum::Unsigned;
+
 use super::Element;
 use super::simple::Matrix as Simple;
 
-pub const FRAGMENT_SIZE: usize = 16;
-
-pub struct Fragment([Element; FRAGMENT_SIZE * FRAGMENT_SIZE]);
-
-impl Default for Fragment {
-    fn default() -> Self {
-        Fragment([0.; FRAGMENT_SIZE * FRAGMENT_SIZE])
-    }
-}
-
-pub struct Matrix {
+#[derive(Clone, Debug, PartialEq)]
+pub struct Matrix<Frag: Unsigned> {
+    _frag: Frag,
     size: usize,
-    content: Vec<Fragment>,
+    content: Vec<Element>,
 }
 
-impl<'a> From<&'a Simple> for Matrix {
+impl<'a, Frag: Unsigned + Default> From<&'a Simple> for Matrix<Frag> {
     fn from(matrix: &'a Simple) -> Self {
-        fn convert(matrix: &Simple, content: &mut Vec<Fragment>, x: usize, y: usize, s: usize) {
-            if s == FRAGMENT_SIZE {
-                let mut f = Fragment::default();
-                for i in 0..FRAGMENT_SIZE {
-                    for j in 0..FRAGMENT_SIZE {
-                        f.0[j * FRAGMENT_SIZE + i] = matrix[(i + x, j + y)];
+        fn convert(
+            matrix: &Simple,
+            content: &mut Vec<Element>,
+            x: usize,
+            y: usize,
+            s: usize,
+            frag: usize
+        ) {
+            if s == frag {
+                for j in 0..frag {
+                    for i in 0..frag {
+                        content.push(matrix[(i + x, j + y)]);
                     }
                 }
-                content.push(f);
             } else {
                 let s = s / 2;
-                convert(matrix, content, x, y, s);
-                convert(matrix, content, x + s, y, s);
-                convert(matrix, content, x, y + s, s);
-                convert(matrix, content, x + s, y + s, s);
+                convert(matrix, content, x, y, s, frag);
+                convert(matrix, content, x + s, y, s, frag);
+                convert(matrix, content, x, y + s, s, frag);
+                convert(matrix, content, x + s, y + s, s, frag);
             }
         }
 
         let size = matrix.width();
-        let fragment_cnt = size * size / FRAGMENT_SIZE / FRAGMENT_SIZE;
 
         assert_eq!(matrix.width(), matrix.height(), "We support only square matrices");
-        assert!(size % FRAGMENT_SIZE == 0, "Matrix size must be multiple of {}", FRAGMENT_SIZE);
-        assert_eq!(size.count_ones(), 1, "Matrix size must be power of 2");
+        assert!(size % Frag::USIZE == 0, "Matrix size must be multiple of {}", Frag::USIZE);
+        assert_eq!((size / Frag::USIZE).count_ones(), 1, "Matrix size must be power of 2");
 
-        let mut content = Vec::with_capacity(fragment_cnt);
-        convert(matrix, &mut content, 0, 0, size);
+        let mut content = Vec::with_capacity(size * size);
+        convert(matrix, &mut content, 0, 0, size, Frag::USIZE);
         Self {
+            _frag: Frag::default(),
             size,
             content,
         }
     }
 }
 
-impl<'a> From<&'a Matrix> for Simple {
-    fn from(matrix: &'a Matrix) -> Self {
-        fn convert(
-            matrix: &Matrix,
+impl<'a, Frag: Unsigned> From<&'a Matrix<Frag>> for Simple {
+    fn from(matrix: &'a Matrix<Frag>) -> Self {
+        fn convert<Frag: Unsigned>(
+            matrix: &Matrix<Frag>,
             result: &mut Simple,
             x: usize,
             y: usize,
             s: usize,
-            pos: &mut usize
+            pos: &mut usize,
         ) {
-            if s == FRAGMENT_SIZE {
-                for i in 0..FRAGMENT_SIZE {
-                    for j in 0..FRAGMENT_SIZE {
-                        result[(i + x, j + y)] = matrix.content[*pos].0[j * FRAGMENT_SIZE + i];
+            if s == Frag::USIZE {
+                for j in 0..Frag::USIZE {
+                    for i in 0..Frag::USIZE {
+                        result[(i + x, j + y)] = matrix.content[*pos];
+                        *pos += 1;
                     }
                 }
-                *pos += 1;
             } else {
                 let s = s / 2;
                 convert(matrix, result, x, y, s, pos);
@@ -87,13 +86,54 @@ impl<'a> From<&'a Matrix> for Simple {
 mod tests {
     use super::*;
 
-    #[test]
-    fn there_and_back() {
+    use typenum::{U1, U2, U7, U16};
+
+    fn test_tab<Frag: Unsigned + Default>() {
         for shift in 0..7 {
-            let matrix = Simple::random(FRAGMENT_SIZE << shift, FRAGMENT_SIZE << shift);
-            let there = Matrix::from(&matrix);
+            let matrix = Simple::random(16 << shift, 16 << shift);
+            let there = Matrix::<U16>::from(&matrix);
             let back = Simple::from(&there);
             assert_eq!(matrix, back);
         }
+    }
+
+    #[test]
+    fn there_and_back_16() {
+        test_tab::<U16>();
+    }
+
+    #[test]
+    fn there_and_back_1() {
+        test_tab::<U1>();
+    }
+
+    #[test]
+    fn there_and_back_2() {
+        test_tab::<U2>();
+    }
+
+    #[test]
+    fn there_and_back_7() {
+        test_tab::<U7>();
+    }
+
+    #[test]
+    fn no_frag() {
+        // Matrix 2*2 stays the same
+        let ar = vec![1., 2., 3., 4.];
+        let mut matrix = Simple::sized(2, 2);
+        matrix[(0, 0)] = 1.;
+        matrix[(1, 0)] = 2.;
+        matrix[(0, 1)] = 3.;
+        matrix[(1, 1)] = 4.;
+        let conv = Matrix::<U1>::from(&matrix);
+        let exp = Matrix {
+            _frag: U1::default(),
+            size: 2,
+            content: ar.clone(),
+        };
+        assert_eq!(exp, conv);
+        let back = Simple::from(&conv);
+        assert_eq!(matrix, back);
     }
 }
