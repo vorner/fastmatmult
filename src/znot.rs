@@ -1,5 +1,5 @@
 use typenum::Unsigned;
-use rayon::scope;
+use rayon::prelude::*;
 
 use super::Element;
 use super::simple::{self, Matrix as Simple, Slice, SliceMut};
@@ -84,50 +84,29 @@ impl<'a, Frag: Unsigned> From<&'a Matrix<Frag>> for Simple {
 }
 
 pub trait Distribute {
-    fn run<F1, F2, F3, F4>(size: usize, f1: F1, f2: F2, f3: F3, f4: F4)
-    where
-        F1: FnOnce() + Send,
-        F2: FnOnce() + Send,
-        F3: FnOnce() + Send,
-        F4: FnOnce() + Send;
+    fn run<I: Send, F: Fn(&mut I) + Send + Sync>(size: usize, tasks: &mut [I], f: F);
 }
 
 pub struct DontDistribute;
 
 impl Distribute for DontDistribute {
-    fn run<F1, F2, F3, F4>(_: usize, f1: F1, f2: F2, f3: F3, f4: F4)
-    where
-        F1: FnOnce() + Send,
-        F2: FnOnce() + Send,
-        F3: FnOnce() + Send,
-        F4: FnOnce() + Send,
-    {
-        f1();
-        f2();
-        f3();
-        f4();
+    fn run<I: Send, F: Fn(&mut I) + Send + Sync>(_: usize, tasks: &mut [I], f: F) {
+        for task in tasks {
+            f(task);
+        }
     }
 }
 
 pub struct RayonDistribute<Limit: Unsigned>(pub Limit);
 
 impl<Limit: Unsigned> Distribute for RayonDistribute<Limit> {
-    fn run<F1, F2, F3, F4>(size: usize, f1: F1, f2: F2, f3: F3, f4: F4)
-    where
-        F1: FnOnce() + Send,
-        F2: FnOnce() + Send,
-        F3: FnOnce() + Send,
-        F4: FnOnce() + Send,
-    {
+    fn run<I: Send, F: Fn(&mut I) + Send + Sync>(size: usize, tasks: &mut [I], f: F) {
         if size >= Limit::USIZE {
-            scope(|s| {
-                s.spawn(|_| f1());
-                s.spawn(|_| f2());
-                s.spawn(|_| f3());
-                s.spawn(|_| f4());
-            })
+            tasks
+                .into_par_iter()
+                .for_each(f);
         } else {
-            DontDistribute::run(size, f1, f2, f3, f4);
+            DontDistribute::run(size, tasks, f);
         }
     }
 }
@@ -184,25 +163,16 @@ where
             let (r00, rest) = r.split_at_mut(block);
             let (r01, rest) = rest.split_at_mut(block);
             let (r10, r11) = rest.split_at_mut(block);
-            Dist::run(
-                size,
-                || {
-                    mult_add::<Dist>(r00, a00, b00, s, frag);
-                    mult_add::<Dist>(r00, a01, b10, s, frag);
-                },
-                || {
-                    mult_add::<Dist>(r01, a00, b01, s, frag);
-                    mult_add::<Dist>(r01, a01, b11, s, frag);
-                },
-                || {
-                    mult_add::<Dist>(r10, a10, b00, s, frag);
-                    mult_add::<Dist>(r10, a11, b10, s, frag);
-                },
-                || {
-                    mult_add::<Dist>(r11, a10, b01, s, frag);
-                    mult_add::<Dist>(r11, a11, b11, s, frag);
-                },
-            );
+            let mut tasks = [
+                (r00, a00, b00, a01, b10),
+                (r01, a00, b01, a01, b11),
+                (r10, a10, b00, a11, b10),
+                (r11, a10, b01, a11, b11),
+            ];
+            Dist::run(size, &mut tasks, |&mut (ref mut r, ref a1, ref b1, ref a2, ref b2)| {
+                mult_add::<Dist>(r, a1, b1, s, frag);
+                mult_add::<Dist>(r, a2, b2, s, frag);
+            });
         }
     }
     mult_add::<Dist>(&mut result.content, &a.content, &b.content, a.size, Frag::USIZE);
