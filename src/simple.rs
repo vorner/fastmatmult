@@ -72,6 +72,20 @@ impl Matrix {
     }
     pub fn height(&self) -> usize { self.height }
     pub fn width(&self) -> usize { self.width }
+    pub(crate) fn slice(&self) -> Slice {
+        Slice {
+            width: self.width,
+            height: self.height,
+            content: &self.content,
+        }
+    }
+    pub(crate) fn slice_mut(&mut self) -> SliceMut {
+        SliceMut {
+            width: self.width,
+            height: self.height,
+            content: &mut self.content,
+        }
+    }
 }
 
 impl Index<(usize, usize)> for Matrix {
@@ -87,14 +101,58 @@ impl IndexMut<(usize, usize)> for Matrix {
     }
 }
 
-pub fn multiply(a: &Matrix, b: &Matrix) -> Matrix {
+pub(crate) struct Slice<'a> {
+    pub(crate) width: usize,
+    pub(crate) height: usize,
+    pub(crate) content: &'a [Element],
+}
+
+impl<'a> Index<(usize, usize)> for Slice<'a> {
+    type Output = Element;
+    fn index(&self, index: (usize, usize)) -> &Element {
+        &self.content[index.0 + self.width * index.1]
+    }
+}
+
+pub(crate) struct SliceMut<'a> {
+    pub(crate) width: usize,
+    pub(crate) height: usize,
+    pub(crate) content: &'a mut [Element],
+}
+
+impl<'a> Index<(usize, usize)> for SliceMut<'a> {
+    type Output = Element;
+    fn index(&self, index: (usize, usize)) -> &Element {
+        &self.content[index.0 + self.width * index.1]
+    }
+}
+
+impl<'a> IndexMut<(usize, usize)> for SliceMut<'a> {
+    fn index_mut(&mut self, index: (usize, usize)) -> &mut Element {
+        &mut self.content[index.0 + self.width * index.1]
+    }
+}
+
+pub(crate) fn multiply_add(into: &mut SliceMut, a: &Slice, b: &Slice) {
     assert_eq!(a.width, b.height);
 
+    let w = into.width;
+    let h = into.height;
+    let l = a.width;
+
+    for y in 0..h {
+        for x in 0..w {
+            for p in 0..l {
+                into[(x, y)] += a[(p, y)] * b[(x, p)];
+            }
+        }
+    }
+}
+
+pub fn multiply(a: &Matrix, b: &Matrix) -> Matrix {
     let mut r = Matrix::sized(b.width, a.height);
 
-    let w = r.width;
-    let h = r.height;
-    let l = a.width;
+    multiply_add(&mut r.slice_mut(), &a.slice(), &b.slice());
 
     // These serve two purposes:
     // * Sanity check the matrix implementations.
@@ -102,14 +160,6 @@ pub fn multiply(a: &Matrix, b: &Matrix) -> Matrix {
     a.validate();
     b.validate();
     r.validate();
-
-    for x in 0..w {
-        for y in 0..h {
-            for p in 0..l {
-                r[(x, y)] += a[(p, y)] * b[(x, p)];
-            }
-        }
-    }
 
     r
 }
@@ -126,6 +176,24 @@ mod tests {
             }
             r
         }
+    }
+
+    #[test]
+    fn add_mult() {
+        let mut result = Matrix::sized(2, 2);
+        let id = Matrix::identity(2);
+        multiply_add(&mut result.slice_mut(), &id.slice(), &id.slice());
+        assert_eq!(result, id);
+        multiply_add(&mut result.slice_mut(), &id.slice(), &id.slice());
+        let double = Matrix {
+            width: 2,
+            height: 2,
+            content: vec![
+                2., 0.,
+                0., 2.0,
+            ],
+        };
+        assert_eq!(result, double);
     }
 
     #[test]
