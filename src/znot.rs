@@ -1,4 +1,5 @@
 use typenum::Unsigned;
+use rayon::scope;
 
 use super::Element;
 use super::simple::{self, Matrix as Simple, Slice, SliceMut};
@@ -82,7 +83,60 @@ impl<'a, Frag: Unsigned> From<&'a Matrix<Frag>> for Simple {
     }
 }
 
-pub fn multiply<Frag: Unsigned + Default>(a: &Matrix<Frag>, b: &Matrix<Frag>) -> Matrix<Frag> {
+pub trait Distribute {
+    fn run<F1, F2, F3, F4>(size: usize, f1: F1, f2: F2, f3: F3, f4: F4)
+    where
+        F1: FnOnce() + Send,
+        F2: FnOnce() + Send,
+        F3: FnOnce() + Send,
+        F4: FnOnce() + Send;
+}
+
+pub struct DontDistribute;
+
+impl Distribute for DontDistribute {
+    fn run<F1, F2, F3, F4>(_: usize, f1: F1, f2: F2, f3: F3, f4: F4)
+    where
+        F1: FnOnce() + Send,
+        F2: FnOnce() + Send,
+        F3: FnOnce() + Send,
+        F4: FnOnce() + Send,
+    {
+        f1();
+        f2();
+        f3();
+        f4();
+    }
+}
+
+pub struct RayonDistribute<Limit: Unsigned>(pub Limit);
+
+impl<Limit: Unsigned> Distribute for RayonDistribute<Limit> {
+    fn run<F1, F2, F3, F4>(size: usize, f1: F1, f2: F2, f3: F3, f4: F4)
+    where
+        F1: FnOnce() + Send,
+        F2: FnOnce() + Send,
+        F3: FnOnce() + Send,
+        F4: FnOnce() + Send,
+    {
+        if size >= Limit::USIZE {
+            scope(|s| {
+                s.spawn(|_| f1());
+                s.spawn(|_| f2());
+                s.spawn(|_| f3());
+                s.spawn(|_| f4());
+            })
+        } else {
+            DontDistribute::run(size, f1, f2, f3, f4);
+        }
+    }
+}
+
+pub fn multiply<Frag, Dist>(a: &Matrix<Frag>, b: &Matrix<Frag>) -> Matrix<Frag>
+where
+    Frag: Unsigned + Default,
+    Dist: Distribute,
+{
     assert_eq!(a.size, b.size);
     let mut result = Matrix {
         _frag: Frag::default(),
@@ -90,7 +144,13 @@ pub fn multiply<Frag: Unsigned + Default>(a: &Matrix<Frag>, b: &Matrix<Frag>) ->
         content: vec![0.; a.size * a.size],
     };
 
-    fn mult_add(r: &mut [Element], a: &[Element], b: &[Element], size: usize, frag: usize) {
+    fn mult_add<Dist: Distribute>(
+        r: &mut [Element],
+        a: &[Element],
+        b: &[Element],
+        size: usize,
+        frag: usize
+    ) {
         if size == frag {
             simple::multiply_add(
                 &mut SliceMut {
@@ -110,8 +170,8 @@ pub fn multiply<Frag: Unsigned + Default>(a: &Matrix<Frag>, b: &Matrix<Frag>) ->
                 },
             );
         } else {
-            let size = size / 2;
-            let block = size * size;
+            let s = size / 2;
+            let block = s * s;
             let a00 = &a[0 .. block];
             let a01 = &a[block .. 2 * block];
             let a10 = &a[2 * block .. 3 * block];
@@ -121,20 +181,31 @@ pub fn multiply<Frag: Unsigned + Default>(a: &Matrix<Frag>, b: &Matrix<Frag>) ->
             let b10 = &b[2 * block .. 3 * block];
             let b11 = &b[3 * block .. 4 * block];
 
-            mult_add(&mut r[0 .. block], a00, b00, size, frag);
-            mult_add(&mut r[0 .. block], a01, b10, size, frag);
-
-            mult_add(&mut r[block .. 2 * block], a00, b01, size, frag);
-            mult_add(&mut r[block .. 2 * block], a01, b11, size, frag);
-
-            mult_add(&mut r[2 * block .. 3 * block], a10, b00, size, frag);
-            mult_add(&mut r[2 * block .. 3 * block], a11, b10, size, frag);
-
-            mult_add(&mut r[3 * block .. 4 * block], a10, b01, size, frag);
-            mult_add(&mut r[3 * block .. 4 * block], a11, b11, size, frag);
+            let (r00, rest) = r.split_at_mut(block);
+            let (r01, rest) = rest.split_at_mut(block);
+            let (r10, r11) = rest.split_at_mut(block);
+            Dist::run(
+                size,
+                || {
+                    mult_add::<Dist>(r00, a00, b00, s, frag);
+                    mult_add::<Dist>(r00, a01, b10, s, frag);
+                },
+                || {
+                    mult_add::<Dist>(r01, a00, b01, s, frag);
+                    mult_add::<Dist>(r01, a01, b11, s, frag);
+                },
+                || {
+                    mult_add::<Dist>(r10, a10, b00, s, frag);
+                    mult_add::<Dist>(r10, a11, b10, s, frag);
+                },
+                || {
+                    mult_add::<Dist>(r11, a10, b01, s, frag);
+                    mult_add::<Dist>(r11, a11, b11, s, frag);
+                },
+            );
         }
     }
-    mult_add(&mut result.content, &a.content, &b.content, a.size, Frag::USIZE);
+    mult_add::<Dist>(&mut result.content, &a.content, &b.content, a.size, Frag::USIZE);
 
     result
 }
@@ -143,7 +214,7 @@ pub fn multiply<Frag: Unsigned + Default>(a: &Matrix<Frag>, b: &Matrix<Frag>) ->
 mod tests {
     use super::*;
 
-    use typenum::{U1, U2, U7, U16};
+    use typenum::{U1, U2, U7, U16, U32};
 
     fn test_tab<Frag: Unsigned + Default>() {
         for shift in 0..7 {
@@ -201,8 +272,11 @@ mod tests {
             let expected = simple::multiply(&a, &b);
             let a_z = Matrix::<Frag>::from(&a);
             let b_z = Matrix::<Frag>::from(&b);
-            let r_z = multiply(&a_z, &b_z);
+            let r_z = multiply::<_, DontDistribute>(&a_z, &b_z);
             let result = Simple::from(&r_z);
+            assert_eq!(expected, result);
+            let ra_z = multiply::<_, RayonDistribute<U32>>(&a_z, &b_z);
+            let result = Simple::from(&ra_z);
             assert_eq!(expected, result);
         }
     }
