@@ -1,7 +1,10 @@
+#![feature(test)]
+
 extern crate failure;
 extern crate fastmatmult;
 #[macro_use]
 extern crate structopt;
+extern crate test;
 extern crate typenum;
 
 use std::fmt::Display;
@@ -11,7 +14,7 @@ use std::time::Instant;
 
 use failure::Error;
 use structopt::StructOpt;
-use typenum::{U8, U16, U32, U64, Unsigned};
+use typenum::{U1, U2, U4, U8, U16, U32, U64, U128, Unsigned};
 
 use fastmatmult::simple::Matrix;
 use fastmatmult::znot::Matrix as ZMat;
@@ -26,7 +29,7 @@ struct Opts {
 
 fn measure<N: Display, R, F: FnOnce() -> R>(name: N, f: F) -> R {
     let start = Instant::now();
-    let result = f();
+    let result = test::black_box(f());
     let stop = Instant::now();
     let elapsed = stop - start;
     println!("{}: {}.{:03}", name, elapsed.as_secs(), elapsed.subsec_nanos() / 1_000_000);
@@ -37,7 +40,9 @@ fn block<Frag: Unsigned + Default>(a: &Matrix, b: &Matrix, expected: &Matrix) {
     let r = measure(format!("recursive-{}", Frag::USIZE), || {
         let a_z = ZMat::<Frag>::from(a);
         let b_z = ZMat::<Frag>::from(b);
-        let r_z = fastmatmult::znot::multiply(&a_z, &b_z);
+        let r_z = measure(format!("recursive-inner-{}", Frag::USIZE), || {
+            fastmatmult::znot::multiply(&a_z, &b_z)
+        });
         Matrix::from(&r_z)
     });
 
@@ -51,10 +56,14 @@ fn run() -> Result<(), Error> {
 
     let simple = measure("simple", || fastmatmult::simple::multiply(&m1, &m2));
 
+    block::<U1>(&m1, &m2, &simple);
+    block::<U2>(&m1, &m2, &simple);
+    block::<U4>(&m1, &m2, &simple);
     block::<U8>(&m1, &m2, &simple);
     block::<U16>(&m1, &m2, &simple);
     block::<U32>(&m1, &m2, &simple);
     block::<U64>(&m1, &m2, &simple);
+    block::<U128>(&m1, &m2, &simple);
 
     Ok(())
 }
