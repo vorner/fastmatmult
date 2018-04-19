@@ -1,7 +1,7 @@
 use typenum::Unsigned;
 
 use super::Element;
-use super::simple::Matrix as Simple;
+use super::simple::{self, Matrix as Simple, Slice, SliceMut};
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Matrix<Frag: Unsigned> {
@@ -82,6 +82,63 @@ impl<'a, Frag: Unsigned> From<&'a Matrix<Frag>> for Simple {
     }
 }
 
+pub fn multiply<Frag: Unsigned + Default>(a: &Matrix<Frag>, b: &Matrix<Frag>) -> Matrix<Frag> {
+    assert_eq!(a.size, b.size);
+    let mut result = Matrix {
+        _frag: Frag::default(),
+        size: a.size,
+        content: vec![0.; a.size * a.size],
+    };
+
+    fn mult_add(r: &mut [Element], a: &[Element], b: &[Element], size: usize, frag: usize) {
+        if size == frag {
+            simple::multiply_add(
+                &mut SliceMut {
+                    width: size,
+                    height: size,
+                    content: r,
+                },
+                &Slice {
+                    width: size,
+                    height: size,
+                    content: a,
+                },
+                &Slice {
+                    width: size,
+                    height: size,
+                    content: b,
+                },
+            );
+        } else {
+            let size = size / 2;
+            let block = size * size;
+            let a00 = &a[0 .. block];
+            let a01 = &a[block .. 2 * block];
+            let a10 = &a[2 * block .. 3 * block];
+            let a11 = &a[3 * block .. 4 * block];
+            let b00 = &b[0 .. block];
+            let b01 = &b[block .. 2 * block];
+            let b10 = &b[2 * block .. 3 * block];
+            let b11 = &b[3 * block .. 4 * block];
+
+            mult_add(&mut r[0 .. block], a00, b00, size, frag);
+            mult_add(&mut r[0 .. block], a01, b10, size, frag);
+
+            mult_add(&mut r[block .. 2 * block], a00, b01, size, frag);
+            mult_add(&mut r[block .. 2 * block], a01, b11, size, frag);
+
+            mult_add(&mut r[2 * block .. 3 * block], a10, b00, size, frag);
+            mult_add(&mut r[2 * block .. 3 * block], a11, b10, size, frag);
+
+            mult_add(&mut r[3 * block .. 4 * block], a10, b01, size, frag);
+            mult_add(&mut r[3 * block .. 4 * block], a11, b11, size, frag);
+        }
+    }
+    mult_add(&mut result.content, &a.content, &b.content, a.size, Frag::USIZE);
+
+    result
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -90,8 +147,8 @@ mod tests {
 
     fn test_tab<Frag: Unsigned + Default>() {
         for shift in 0..7 {
-            let matrix = Simple::random(16 << shift, 16 << shift);
-            let there = Matrix::<U16>::from(&matrix);
+            let matrix = Simple::random(Frag::USIZE * 1 << shift, Frag::USIZE * 1 << shift);
+            let there = Matrix::<Frag>::from(&matrix);
             let back = Simple::from(&there);
             assert_eq!(matrix, back);
         }
@@ -135,5 +192,38 @@ mod tests {
         assert_eq!(exp, conv);
         let back = Simple::from(&conv);
         assert_eq!(matrix, back);
+    }
+
+    fn test_multi<Frag: Unsigned + Default>() {
+        for shift in 0..5 {
+            let a = Simple::random(Frag::USIZE * 1 << shift, Frag::USIZE * 1 << shift);
+            let b = Simple::random(Frag::USIZE * 1 << shift, Frag::USIZE * 1 << shift);
+            let expected = simple::multiply(&a, &b);
+            let a_z = Matrix::<Frag>::from(&a);
+            let b_z = Matrix::<Frag>::from(&b);
+            let r_z = multiply(&a_z, &b_z);
+            let result = Simple::from(&r_z);
+            assert_eq!(expected, result);
+        }
+    }
+
+    #[test]
+    fn test_multi_1() {
+        test_multi::<U1>();
+    }
+
+    #[test]
+    fn test_multi_2() {
+        test_multi::<U2>();
+    }
+
+    #[test]
+    fn test_multi_7() {
+        test_multi::<U7>();
+    }
+
+    #[test]
+    fn test_multi_16() {
+        test_multi::<U16>();
     }
 }
