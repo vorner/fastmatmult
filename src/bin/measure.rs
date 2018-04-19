@@ -2,6 +2,7 @@ extern crate failure;
 extern crate fastmatmult;
 #[macro_use]
 extern crate structopt;
+extern crate typenum;
 
 use std::fmt::Display;
 use std::path::PathBuf;
@@ -10,8 +11,10 @@ use std::time::Instant;
 
 use failure::Error;
 use structopt::StructOpt;
+use typenum::{U8, U16, U32, U64, Unsigned};
 
 use fastmatmult::simple::Matrix;
+use fastmatmult::znot::Matrix as ZMat;
 
 #[derive(Debug, StructOpt)]
 struct Opts {
@@ -30,12 +33,29 @@ fn measure<N: Display, R, F: FnOnce() -> R>(name: N, f: F) -> R {
     result
 }
 
+fn block<Frag: Unsigned + Default>(a: &Matrix, b: &Matrix, expected: &Matrix) {
+    let r = measure(format!("recursive-{}", Frag::USIZE), || {
+        let a_z = ZMat::<Frag>::from(a);
+        let b_z = ZMat::<Frag>::from(b);
+        let r_z = fastmatmult::znot::multiply(&a_z, &b_z);
+        Matrix::from(&r_z)
+    });
+
+    assert_eq!(expected, &r);
+}
+
 fn run() -> Result<(), Error> {
     let opts = Opts::from_args();
     let m1 = Matrix::load(&opts.input1)?;
     let m2 = Matrix::load(&opts.input2)?;
 
     let simple = measure("simple", || fastmatmult::simple::multiply(&m1, &m2));
+
+    block::<U8>(&m1, &m2, &simple);
+    block::<U16>(&m1, &m2, &simple);
+    block::<U32>(&m1, &m2, &simple);
+    block::<U64>(&m1, &m2, &simple);
+
     Ok(())
 }
 
