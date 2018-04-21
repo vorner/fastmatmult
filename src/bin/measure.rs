@@ -78,6 +78,10 @@ fn run() -> Result<(), Error> {
 
     let simple = measure("simple", || fastmatmult::simple::multiply(&m1, &m2));
 
+    let _simd = measure("simd", || fastmatmult::simd::multiply(&m1, &m2));
+    // Not checking equality, because simd does slightly different results due to reordering of the
+    // summing
+
     block::<U1>(&m1, &m2, &simple);
     block::<U2>(&m1, &m2, &simple);
     block::<U4>(&m1, &m2, &simple);

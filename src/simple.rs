@@ -169,7 +169,7 @@ mod tests {
     use super::*;
 
     impl Matrix {
-        fn identity(size: usize) -> Self {
+        pub(crate) fn identity(size: usize) -> Self {
             let mut r = Self::sized(size, size);
             for i in 0..size {
                 r[(i, i)] = 1.0;
