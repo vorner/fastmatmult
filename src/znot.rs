@@ -3,6 +3,7 @@ use rayon::prelude::*;
 
 use super::Element;
 use super::simple::{self, Matrix as Simple, Slice, SliceMut};
+use super::simd;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Matrix<Frag: Unsigned> {
@@ -111,10 +112,63 @@ impl<Limit: Unsigned> Distribute for RayonDistribute<Limit> {
     }
 }
 
-pub fn multiply<Frag, Dist>(a: &Matrix<Frag>, b: &Matrix<Frag>) -> Matrix<Frag>
+pub trait FragMultiplyAdd {
+    fn multiply_add(r: &mut [Element], a: &[Element], b: &[Element], size: usize);
+}
+
+pub struct SimpleMultiplyAdd;
+
+impl FragMultiplyAdd for SimpleMultiplyAdd {
+    fn multiply_add(r: &mut [Element], a: &[Element], b: &[Element], size: usize) {
+        simple::multiply_add(
+            &mut SliceMut {
+                width: size,
+                height: size,
+                content: r,
+            },
+            &Slice {
+                width: size,
+                height: size,
+                content: a,
+            },
+            &Slice {
+                width: size,
+                height: size,
+                content: b,
+            },
+        );
+    }
+}
+
+pub struct SimdMultiplyAdd;
+
+impl FragMultiplyAdd for SimdMultiplyAdd {
+    fn multiply_add(r: &mut [Element], a: &[Element], b: &[Element], size: usize) {
+        simd::multiply_add(
+            &mut SliceMut {
+                width: size,
+                height: size,
+                content: r,
+            },
+            &Slice {
+                width: size,
+                height: size,
+                content: a,
+            },
+            &Slice {
+                width: size,
+                height: size,
+                content: b,
+            },
+        );
+    }
+}
+
+pub fn multiply<Frag, Dist, Mult>(a: &Matrix<Frag>, b: &Matrix<Frag>) -> Matrix<Frag>
 where
     Frag: Unsigned + Default,
     Dist: Distribute,
+    Mult: FragMultiplyAdd,
 {
     assert_eq!(a.size, b.size);
     let mut result = Matrix {
@@ -123,7 +177,7 @@ where
         content: vec![0.; a.size * a.size],
     };
 
-    fn mult_add<Dist: Distribute>(
+    fn mult_add<Dist: Distribute, Mult: FragMultiplyAdd>(
         r: &mut [Element],
         a: &[Element],
         b: &[Element],
@@ -131,23 +185,7 @@ where
         frag: usize
     ) {
         if size == frag {
-            simple::multiply_add(
-                &mut SliceMut {
-                    width: size,
-                    height: size,
-                    content: r,
-                },
-                &Slice {
-                    width: size,
-                    height: size,
-                    content: a,
-                },
-                &Slice {
-                    width: size,
-                    height: size,
-                    content: b,
-                },
-            );
+            Mult::multiply_add(r, a, b, size);
         } else {
             let s = size / 2;
             let block = s * s;
@@ -170,12 +208,12 @@ where
                 (r11, a10, b01, a11, b11),
             ];
             Dist::run(size, &mut tasks, |&mut (ref mut r, ref a1, ref b1, ref a2, ref b2)| {
-                mult_add::<Dist>(r, a1, b1, s, frag);
-                mult_add::<Dist>(r, a2, b2, s, frag);
+                mult_add::<Dist, Mult>(r, a1, b1, s, frag);
+                mult_add::<Dist, Mult>(r, a2, b2, s, frag);
             });
         }
     }
-    mult_add::<Dist>(&mut result.content, &a.content, &b.content, a.size, Frag::USIZE);
+    mult_add::<Dist, Mult>(&mut result.content, &a.content, &b.content, a.size, Frag::USIZE);
 
     result
 }
@@ -235,39 +273,72 @@ mod tests {
         assert_eq!(matrix, back);
     }
 
-    fn test_multi<Frag: Unsigned + Default>() {
+    /*
+     * By using SIMD vectors to sum many at once, we reorder the additions on floats. It so happens
+     * this changes the result somewhat, so we put a margin there.
+     */
+    fn approx_eq(mut a: Simple, mut b: Simple) {
+        for val in a.slice_mut().content {
+            *val = (*val / 20.0).round();
+        }
+        for val in b.slice_mut().content {
+            *val = (*val / 20.0).round();
+        }
+    }
+
+    fn test_multi<Frag: Unsigned + Default, Mult: FragMultiplyAdd>() {
         for shift in 0..5 {
             let a = Simple::random(Frag::USIZE * 1 << shift, Frag::USIZE * 1 << shift);
             let b = Simple::random(Frag::USIZE * 1 << shift, Frag::USIZE * 1 << shift);
             let expected = simple::multiply(&a, &b);
             let a_z = Matrix::<Frag>::from(&a);
             let b_z = Matrix::<Frag>::from(&b);
-            let r_z = multiply::<_, DontDistribute>(&a_z, &b_z);
+            let r_z = multiply::<_, DontDistribute, Mult>(&a_z, &b_z);
             let result = Simple::from(&r_z);
-            assert_eq!(expected, result);
-            let ra_z = multiply::<_, RayonDistribute<U32>>(&a_z, &b_z);
+            approx_eq(expected.clone(), result);
+            let ra_z = multiply::<_, RayonDistribute<U32>, Mult>(&a_z, &b_z);
             let result = Simple::from(&ra_z);
-            assert_eq!(expected, result);
+            approx_eq(expected, result);
         }
     }
 
     #[test]
     fn test_multi_1() {
-        test_multi::<U1>();
+        test_multi::<U1, SimpleMultiplyAdd>();
     }
 
     #[test]
     fn test_multi_2() {
-        test_multi::<U2>();
+        test_multi::<U2, SimpleMultiplyAdd>();
     }
 
     #[test]
     fn test_multi_7() {
-        test_multi::<U7>();
+        test_multi::<U7, SimpleMultiplyAdd>();
     }
 
     #[test]
     fn test_multi_16() {
-        test_multi::<U16>();
+        test_multi::<U16, SimpleMultiplyAdd>();
+    }
+
+    #[test]
+    fn test_multi_1_simd() {
+        test_multi::<U1, SimdMultiplyAdd>();
+    }
+
+    #[test]
+    fn test_multi_2_simd() {
+        test_multi::<U2, SimdMultiplyAdd>();
+    }
+
+    #[test]
+    fn test_multi_7_simd() {
+        test_multi::<U7, SimdMultiplyAdd>();
+    }
+
+    #[test]
+    fn test_multi_16_simd() {
+        test_multi::<U16, SimdMultiplyAdd>();
     }
 }

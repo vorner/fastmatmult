@@ -17,7 +17,10 @@ use structopt::StructOpt;
 use typenum::{U1, U2, U4, U8, U16, U32, U64, U128, U256, Unsigned};
 
 use fastmatmult::simple::Matrix;
-use fastmatmult::znot::{DontDistribute, Matrix as ZMat, RayonDistribute};
+use fastmatmult::znot::{
+    Distribute, DontDistribute, FragMultiplyAdd, Matrix as ZMat, RayonDistribute, SimdMultiplyAdd,
+    SimpleMultiplyAdd
+};
 
 #[derive(Debug, StructOpt)]
 struct Opts {
@@ -36,39 +39,48 @@ fn measure<N: Display, R, F: FnOnce() -> R>(name: N, f: F) -> R {
     result
 }
 
-fn block<Frag: Unsigned + Default>(a: &Matrix, b: &Matrix, expected: &Matrix) {
-    let r = measure(format!("recursive-{}", Frag::USIZE), || {
+fn block_inner<Dist, Mult, Frag>(suffix: &str, a: &Matrix, b: &Matrix, expected: Option<&Matrix>)
+where
+    Dist: Distribute,
+    Frag: Unsigned + Default,
+    Mult: FragMultiplyAdd,
+{
+    let r = measure(format!("recursive{}-{}", suffix, Frag::USIZE), || {
         let a_z = ZMat::<Frag>::from(a);
         let b_z = ZMat::<Frag>::from(b);
-        let r_z = measure(format!("recursive-inner-{}", Frag::USIZE), || {
-            fastmatmult::znot::multiply::<_, DontDistribute>(&a_z, &b_z)
+        let r_z = measure(format!("recursive-inner{}-{}", suffix, Frag::USIZE), || {
+            fastmatmult::znot::multiply::<_, Dist, Mult>(&a_z, &b_z)
         });
         Matrix::from(&r_z)
     });
 
-    assert_eq!(expected, &r);
+    if let Some(expected) = expected {
+        assert_eq!(expected, &r);
+    }
+}
 
-    let r = measure(format!("recursive-paral-{}", Frag::USIZE), || {
-        let a_z = ZMat::<Frag>::from(a);
-        let b_z = ZMat::<Frag>::from(b);
-        let r_z = measure(format!("recursive-paral-inner-{}", Frag::USIZE), || {
-            fastmatmult::znot::multiply::<_, RayonDistribute<Frag>>(&a_z, &b_z)
-        });
-        Matrix::from(&r_z)
-    });
-
-    assert_eq!(expected, &r);
-
-    let r = measure(format!("recursive-paral-cutoff-{}", Frag::USIZE), || {
-        let a_z = ZMat::<Frag>::from(a);
-        let b_z = ZMat::<Frag>::from(b);
-        let r_z = measure(format!("recursive-paral-cutoff-inner-{}", Frag::USIZE), || {
-            fastmatmult::znot::multiply::<_, RayonDistribute<U256>>(&a_z, &b_z)
-        });
-        Matrix::from(&r_z)
-    });
-
-    assert_eq!(expected, &r);
+fn block<Frag>(a: &Matrix, b: &Matrix, expected: &Matrix)
+where
+    Frag: Unsigned + Default,
+{
+    block_inner::<DontDistribute, SimpleMultiplyAdd, Frag>("", a, b, Some(expected));
+    block_inner::<RayonDistribute<Frag>, SimpleMultiplyAdd, Frag>("-paral", a, b, Some(expected));
+    block_inner::<RayonDistribute<U256>, SimpleMultiplyAdd, Frag>(
+        "-paral-cutoff",
+        a,
+        b,
+        Some(expected)
+    );
+    if Frag::USIZE >= 4 {
+        block_inner::<DontDistribute, SimdMultiplyAdd, Frag>("-simd", a, b, None);
+        block_inner::<RayonDistribute<Frag>, SimdMultiplyAdd, Frag>("-simd-paral", a, b, None);
+        block_inner::<RayonDistribute<U256>, SimdMultiplyAdd, Frag>(
+            "-simd-paral-cutoff",
+            a,
+            b,
+            None
+        );
+    }
 }
 
 fn run() -> Result<(), Error> {
@@ -90,6 +102,7 @@ fn run() -> Result<(), Error> {
     block::<U32>(&m1, &m2, &simple);
     block::<U64>(&m1, &m2, &simple);
     block::<U128>(&m1, &m2, &simple);
+    block::<U256>(&m1, &m2, &simple);
 
     Ok(())
 }
