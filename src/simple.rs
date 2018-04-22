@@ -1,6 +1,6 @@
 use std::fs::File;
 use std::io::{BufReader, BufWriter};
-use std::ops::{Index, IndexMut};
+use std::ops::{AddAssign, Index, IndexMut, Mul};
 use std::path::Path;
 
 use bincode;
@@ -31,7 +31,7 @@ impl<'a> Iterator for Rows<'a> {
 pub struct Matrix {
     width: usize,
     height: usize,
-    content: Vec<Element>,
+    pub(crate) content: Vec<Element>,
 }
 
 impl Matrix {
@@ -72,14 +72,14 @@ impl Matrix {
     }
     pub fn height(&self) -> usize { self.height }
     pub fn width(&self) -> usize { self.width }
-    pub(crate) fn slice(&self) -> Slice {
+    pub(crate) fn slice(&self) -> Slice<Element> {
         Slice {
             width: self.width,
             height: self.height,
             content: &self.content,
         }
     }
-    pub(crate) fn slice_mut(&mut self) -> SliceMut {
+    pub(crate) fn slice_mut(&mut self) -> SliceMut<Element> {
         SliceMut {
             width: self.width,
             height: self.height,
@@ -101,39 +101,42 @@ impl IndexMut<(usize, usize)> for Matrix {
     }
 }
 
-pub(crate) struct Slice<'a> {
+pub(crate) struct Slice<'a, Elem: 'a> {
     pub(crate) width: usize,
     pub(crate) height: usize,
-    pub(crate) content: &'a [Element],
+    pub(crate) content: &'a [Elem],
 }
 
-impl<'a> Index<(usize, usize)> for Slice<'a> {
-    type Output = Element;
-    fn index(&self, index: (usize, usize)) -> &Element {
+impl<'a, Elem: 'a> Index<(usize, usize)> for Slice<'a, Elem> {
+    type Output = Elem;
+    fn index(&self, index: (usize, usize)) -> &Elem {
         &self.content[index.0 + self.width * index.1]
     }
 }
 
-pub(crate) struct SliceMut<'a> {
+pub(crate) struct SliceMut<'a, Elem: 'a> {
     pub(crate) width: usize,
     pub(crate) height: usize,
-    pub(crate) content: &'a mut [Element],
+    pub(crate) content: &'a mut [Elem],
 }
 
-impl<'a> Index<(usize, usize)> for SliceMut<'a> {
-    type Output = Element;
-    fn index(&self, index: (usize, usize)) -> &Element {
+impl<'a, Elem: 'a> Index<(usize, usize)> for SliceMut<'a, Elem> {
+    type Output = Elem;
+    fn index(&self, index: (usize, usize)) -> &Elem {
         &self.content[index.0 + self.width * index.1]
     }
 }
 
-impl<'a> IndexMut<(usize, usize)> for SliceMut<'a> {
-    fn index_mut(&mut self, index: (usize, usize)) -> &mut Element {
+impl<'a, Elem: 'a> IndexMut<(usize, usize)> for SliceMut<'a, Elem> {
+    fn index_mut(&mut self, index: (usize, usize)) -> &mut Elem {
         &mut self.content[index.0 + self.width * index.1]
     }
 }
 
-pub(crate) fn multiply_add(into: &mut SliceMut, a: &Slice, b: &Slice) {
+pub(crate) fn multiply_add<Elem>(into: &mut SliceMut<Elem>, a: &Slice<Elem>, b: &Slice<Elem>)
+where
+    Elem: AddAssign + Mul<Output = Elem> + Copy,
+{
     assert_eq!(a.width, b.height);
 
     let w = into.width;

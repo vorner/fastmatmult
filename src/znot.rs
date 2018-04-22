@@ -1,71 +1,99 @@
+use std::ops::{AddAssign, Mul};
+
 use typenum::Unsigned;
 use rayon::prelude::*;
 
 use super::Element;
 use super::simple::{self, Matrix as Simple, Slice, SliceMut};
 
-#[derive(Clone, Debug, PartialEq)]
-pub struct Matrix<Frag: Unsigned> {
-    _frag: Frag,
-    size: usize,
-    content: Vec<Element>,
+pub trait Frag: Default {
+    type Elem: AddAssign + Mul<Output = Self::Elem> + Copy + Default;
+    const SIZE: usize;
+    const BATCH: usize;
+    fn load(data: &[Element], offset: usize) -> Self::Elem;
+    fn store(elem: Self::Elem, data: &mut [Element], offset: usize);
 }
 
-impl<'a, Frag: Unsigned + Default> From<&'a Simple> for Matrix<Frag> {
+impl<U: Unsigned + Default> Frag for U {
+    type Elem = Element;
+    const SIZE: usize = U::USIZE;
+    const BATCH: usize = 1;
+    fn load(data: &[Element], offset: usize) -> Element {
+        data[offset]
+    }
+    fn store(elem: Element, data: &mut [Element], offset: usize) {
+        data[offset] = elem;
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Matrix<F: Frag> {
+    _frag: F,
+    size: usize,
+    content: Vec<F::Elem>,
+}
+
+impl<'a, F: Frag> From<&'a Simple> for Matrix<F> {
     fn from(matrix: &'a Simple) -> Self {
-        fn convert(
+        fn convert<F: Frag>(
             matrix: &Simple,
-            content: &mut Vec<Element>,
+            content: &mut Vec<F::Elem>,
             x: usize,
             y: usize,
             s: usize,
-            frag: usize
         ) {
-            if s == frag {
-                for j in 0..frag {
-                    for i in 0..frag {
-                        content.push(matrix[(i + x, j + y)]);
+            if s == F::SIZE {
+                for j in 0..F::SIZE {
+                    for i in 0..F::SIZE / F::BATCH {
+                        let xpos = x + i * F::BATCH;
+                        let ypos = y + j;
+                        let pos = xpos + ypos * matrix.width();
+                        content.push(F::load(&matrix.content, pos));
                     }
                 }
             } else {
                 let s = s / 2;
-                convert(matrix, content, x, y, s, frag);
-                convert(matrix, content, x + s, y, s, frag);
-                convert(matrix, content, x, y + s, s, frag);
-                convert(matrix, content, x + s, y + s, s, frag);
+                convert::<F>(matrix, content, x, y, s);
+                convert::<F>(matrix, content, x + s, y, s);
+                convert::<F>(matrix, content, x, y + s, s);
+                convert::<F>(matrix, content, x + s, y + s, s);
             }
         }
 
         let size = matrix.width();
 
+        assert_eq!(F::SIZE % F::BATCH, 0, "Unbatchable fragment size");
         assert_eq!(matrix.width(), matrix.height(), "We support only square matrices");
-        assert!(size % Frag::USIZE == 0, "Matrix size must be multiple of {}", Frag::USIZE);
-        assert_eq!((size / Frag::USIZE).count_ones(), 1, "Matrix size must be power of 2");
+        assert_eq!(size % F::SIZE, 0, "Matrix size must be multiple of {}", F::SIZE);
+        assert_eq!((size / F::SIZE).count_ones(), 1, "Matrix size must be power of 2");
 
-        let mut content = Vec::with_capacity(size * size);
-        convert(matrix, &mut content, 0, 0, size, Frag::USIZE);
+        let mut content = Vec::with_capacity(size * size / F::BATCH);
+        convert::<F>(matrix, &mut content, 0, 0, size);
         Self {
-            _frag: Frag::default(),
+            _frag: F::default(),
             size,
             content,
         }
     }
 }
 
-impl<'a, Frag: Unsigned> From<&'a Matrix<Frag>> for Simple {
-    fn from(matrix: &'a Matrix<Frag>) -> Self {
-        fn convert<Frag: Unsigned>(
-            matrix: &Matrix<Frag>,
+impl<'a, F: Frag> From<&'a Matrix<F>> for Simple {
+    fn from(matrix: &'a Matrix<F>) -> Self {
+        fn convert<F: Frag>(
+            matrix: &Matrix<F>,
             result: &mut Simple,
             x: usize,
             y: usize,
             s: usize,
             pos: &mut usize,
         ) {
-            if s == Frag::USIZE {
-                for j in 0..Frag::USIZE {
-                    for i in 0..Frag::USIZE {
-                        result[(i + x, j + y)] = matrix.content[*pos];
+            if s == F::SIZE {
+                for j in 0..F::SIZE {
+                    for i in 0..F::SIZE / F::BATCH {
+                        let xpos = x + i * F::BATCH;
+                        let ypos = y + j;
+                        let dpos = xpos + ypos * matrix.size;
+                        F::store(matrix.content[*pos], &mut result.content, dpos);
                         *pos += 1;
                     }
                 }
@@ -111,34 +139,33 @@ impl<Limit: Unsigned> Distribute for RayonDistribute<Limit> {
     }
 }
 
-pub fn multiply<Frag, Dist>(a: &Matrix<Frag>, b: &Matrix<Frag>) -> Matrix<Frag>
+pub fn multiply<F, Dist>(a: &Matrix<F>, b: &Matrix<F>) -> Matrix<F>
 where
-    Frag: Unsigned + Default,
+    F: Frag,
     Dist: Distribute,
 {
     assert_eq!(a.size, b.size);
     let mut result = Matrix {
-        _frag: Frag::default(),
+        _frag: F::default(),
         size: a.size,
-        content: vec![0.; a.size * a.size],
+        content: vec![F::Elem::default(); a.size * a.size / F::BATCH],
     };
 
-    fn mult_add<Dist: Distribute>(
-        r: &mut [Element],
-        a: &[Element],
-        b: &[Element],
+    fn mult_add<F: Flag, Dist: Distribute>(
+        r: &mut [F::Elem],
+        a: &[F::Elem],
+        b: &[F::Elem],
         size: usize,
-        frag: usize
     ) {
-        if size == frag {
+        if size == F::SIZE {
             simple::multiply_add(
                 &mut SliceMut {
-                    width: size,
+                    width: size / F::BATCH,
                     height: size,
                     content: r,
                 },
                 &Slice {
-                    width: size,
+                    width: size / F::,
                     height: size,
                     content: a,
                 },
@@ -175,7 +202,7 @@ where
             });
         }
     }
-    mult_add::<Dist>(&mut result.content, &a.content, &b.content, a.size, Frag::USIZE);
+    mult_add::<Dist>(&mut result.content, &a.content, &b.content, a.size, F::SIZE);
 
     result
 }
