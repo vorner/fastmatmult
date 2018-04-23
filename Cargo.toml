@@ -8,11 +8,12 @@ publish = false
 [dependencies]
 bincode = "~1"
 failure = "~0.1"
-faster = { git = "https://github.com/vorner/faster", branch = "clone" }
+faster = { git = "https://github.com/vorner/faster", branch = "collect" }
 itertools = "~0.6"
 rand = "~0.4"
 rayon = "~1"
 serde = "~1"
 serde_derive = "~1"
+smallvec = "~0.6"
 structopt = "~0.2"
 typenum = "~1"

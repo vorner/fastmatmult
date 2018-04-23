@@ -6,6 +6,7 @@ extern crate rayon;
 extern crate serde;
 #[macro_use]
 extern crate serde_derive;
+extern crate smallvec;
 extern crate typenum;
 
 pub mod simd;

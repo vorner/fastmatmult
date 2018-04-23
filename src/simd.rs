@@ -1,6 +1,7 @@
-use super::simple::{Matrix, Slice, SliceMut};
-
 use faster::*;
+use smallvec::SmallVec;
+
+use super::simple::{Matrix, Slice, SliceMut};
 
 pub(crate) fn multiply_add(into: &mut SliceMut, a: &Slice, b: &Slice) {
     assert_eq!(a.width, b.height);
@@ -14,7 +15,7 @@ pub(crate) fn multiply_add(into: &mut SliceMut, a: &Slice, b: &Slice) {
     let columns = b.content
         .simd_iter(f32s(0.));
     let columns = columns
-        .stride(b.width, &pads);
+        .stride::<SmallVec<[_; 512]>>(b.width, &pads);
 
     for y in 0..h {
         let row = &a.content[y * l .. (y + 1) * l];
