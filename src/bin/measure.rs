@@ -14,7 +14,7 @@ use std::time::Instant;
 
 use failure::Error;
 use structopt::StructOpt;
-use typenum::{U1, U2, U4, U8, U16, U32, U64, U128, U256, Unsigned};
+use typenum::{U1, U2, U4, U8, U16, U32, U64, U128, U256, U512, U1024, Unsigned};
 
 use fastmatmult::simple::Matrix;
 use fastmatmult::znot::{
@@ -63,6 +63,9 @@ fn block<Frag>(a: &Matrix, b: &Matrix, expected: &Matrix)
 where
     Frag: Unsigned + Default,
 {
+    if a.width() < Frag::USIZE {
+        return;
+    }
     block_inner::<DontDistribute, SimpleMultiplyAdd, Frag>("", a, b, Some(expected));
     block_inner::<RayonDistribute<Frag>, SimpleMultiplyAdd, Frag>("-paral", a, b, Some(expected));
     block_inner::<RayonDistribute<U256>, SimpleMultiplyAdd, Frag>(
@@ -103,6 +106,8 @@ fn run() -> Result<(), Error> {
     block::<U64>(&m1, &m2, &simple);
     block::<U128>(&m1, &m2, &simple);
     block::<U256>(&m1, &m2, &simple);
+    block::<U512>(&m1, &m2, &simple);
+    block::<U1024>(&m1, &m2, &simple);
 
     Ok(())
 }
