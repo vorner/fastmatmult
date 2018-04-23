@@ -1,3 +1,5 @@
+use std::iter;
+
 use faster::*;
 use smallvec::SmallVec;
 
@@ -11,18 +13,22 @@ pub(crate) fn multiply_add(into: &mut SliceMut, a: &Slice, b: &Slice) {
     let h = into.height;
     let l = a.width;
 
-    let pads = vec![f32s(0.); b.width];
+    let pads = iter::repeat(f32s(0.))
+        .take(b.width)
+        .collect::<SmallVec<[_; 512]>>();
     let columns = b.content
         .simd_iter(f32s(0.));
     let columns = columns
         .stride::<SmallVec<[_; 512]>>(b.width, &pads);
+    let mut column_data = iter::repeat(0.0)
+        .take(b.height)
+        .collect::<SmallVec<[_; 512]>>();
 
-    for y in 0..h {
-        let row = &a.content[y * l .. (y + 1) * l];
-
-        for (x, column) in columns.iter().enumerate() {
-            let column = column.clone();
-            into[(x, y)] += (row.simd_iter(f32s(0.)), column.clone()).zip()
+    for (x, mut column) in columns.into_iter().enumerate() {
+        column.scalar_fill(&mut column_data);
+        for y in 0..h {
+            let row = &a.content[y * l .. (y + 1) * l];
+            into[(x, y)] += (row.simd_iter(f32s(0.)), column_data.simd_iter(f32s(0.))).zip()
                 .simd_reduce(f32s(0.0), |acc, (a, b)| acc + a * b)
                 .sum();
         }

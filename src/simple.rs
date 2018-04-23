@@ -140,8 +140,8 @@ pub(crate) fn multiply_add(into: &mut SliceMut, a: &Slice, b: &Slice) {
     let h = into.height;
     let l = a.width;
 
-    for y in 0..h {
-        for x in 0..w {
+    for x in 0..w {
+        for y in 0..h {
             for p in 0..l {
                 into[(x, y)] += a[(p, y)] * b[(x, p)];
             }
