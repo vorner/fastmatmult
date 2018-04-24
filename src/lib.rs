@@ -1,6 +1,9 @@
+#![feature(nll)]
 extern crate bincode;
 extern crate failure;
+#[macro_use] // tuplify macro ‒ abused somewhere else, but who cares
 extern crate faster;
+extern crate itertools;
 extern crate rand;
 extern crate rayon;
 extern crate serde;

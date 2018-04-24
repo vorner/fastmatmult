@@ -1,5 +1,6 @@
-use typenum::Unsigned;
+use faster::prelude::*;
 use rayon::prelude::*;
+use typenum::Unsigned;
 
 use super::Element;
 use super::simple::{self, Matrix as Simple, Slice, SliceMut};
@@ -164,6 +165,19 @@ impl FragMultiplyAdd for SimdMultiplyAdd {
     }
 }
 
+macro_rules! quads {
+    ($slice: expr) => {{
+        let len = $slice.len() / 4;
+        let mut iter = $slice.chunks(len);
+        tuplify!(4, iter.next().unwrap())
+    }};
+    (mut $slice: expr) => {{
+        let len = $slice.len() / 4;
+        let mut iter = $slice.chunks_mut(len);
+        tuplify!(4, iter.next().unwrap())
+    }};
+}
+
 pub fn multiply<Frag, Dist, Mult>(a: &Matrix<Frag>, b: &Matrix<Frag>) -> Matrix<Frag>
 where
     Frag: Unsigned + Default,
@@ -182,30 +196,21 @@ where
         a: &[Element],
         b: &[Element],
         size: usize,
-        frag: usize
+        frag: usize,
     ) {
         if size == frag {
             Mult::multiply_add(r, a, b, size);
         } else {
             let s = size / 2;
-            let block = s * s;
-            let a00 = &a[0 .. block];
-            let a01 = &a[block .. 2 * block];
-            let a10 = &a[2 * block .. 3 * block];
-            let a11 = &a[3 * block .. 4 * block];
-            let b00 = &b[0 .. block];
-            let b01 = &b[block .. 2 * block];
-            let b10 = &b[2 * block .. 3 * block];
-            let b11 = &b[3 * block .. 4 * block];
+            let (a11, a12, a21, a22) = quads!(a);
+            let (b11, b12, b21, b22) = quads!(b);
+            let (r11, r12, r21, r22) = quads!(mut r);
 
-            let (r00, rest) = r.split_at_mut(block);
-            let (r01, rest) = rest.split_at_mut(block);
-            let (r10, r11) = rest.split_at_mut(block);
             let mut tasks = [
-                (r00, a00, b00, a01, b10),
-                (r01, a00, b01, a01, b11),
-                (r10, a10, b00, a11, b10),
-                (r11, a10, b01, a11, b11),
+                (r11, a11, b11, a12, b21),
+                (r12, a11, b12, a12, b22),
+                (r21, a21, b11, a22, b21),
+                (r22, a21, b12, a22, b22),
             ];
             Dist::run(size, &mut tasks, |&mut (ref mut r, ref a1, ref b1, ref a2, ref b2)| {
                 mult_add::<Dist, Mult>(r, a1, b1, s, frag);
@@ -214,6 +219,96 @@ where
         }
     }
     mult_add::<Dist, Mult>(&mut result.content, &a.content, &b.content, a.size, Frag::USIZE);
+
+    result
+}
+
+macro_rules! op {
+    ($res: expr => $first: ident $($op: tt $next: ident)*) => {{
+        ($first.simd_iter(f32s(0.)), $($next.simd_iter(f32s(0.)),)*).zip()
+            .simd_map(|($first, $($next,)*)| $first $($op $next)*)
+            .scalar_fill($res);
+    }};
+    ($buf: expr, $first: ident $($op: tt $next: ident)*) => {{
+        let res: &mut [_] = $buf.next().unwrap();
+        op!(res => $first $($op $next)*);
+        // Get rid of mut
+        &*res
+    }};
+}
+
+pub fn strassen<Frag, Dist, Mult>(a: &Matrix<Frag>, b: &Matrix<Frag>) -> Matrix<Frag>
+where
+    Frag: Unsigned + Default,
+    Dist: Distribute,
+    Mult: FragMultiplyAdd,
+{
+    assert_eq!(a.size, b.size);
+    let mut result = Matrix {
+        _frag: Frag::default(),
+        size: a.size,
+        content: vec![0.; a.size * a.size],
+    };
+
+    fn step<Dist: Distribute, Mult: FragMultiplyAdd>(
+        r: &mut [Element],
+        a: &[Element],
+        b: &[Element],
+        size: usize,
+        frag: usize,
+    ) {
+        if size == frag {
+            Mult::multiply_add(r, a, b, size);
+        } else {
+            let s = size / 2;
+            let block = s * s;
+            let (a11, a12, a21, a22) = quads!(a);
+            let (b11, b12, b21, b22) = quads!(b);
+            let (r11, r12, r21, r22) = quads!(mut r);
+
+            // We need some auxiliary space (for 17 matrices ‒ or can we optimise? Can we reuse the
+            // space of the results?). Allocate it in just one chunk and split it up.
+            let mut buffer = vec![0.; 17 * block];
+            let mut bc = buffer.chunks_mut(block);
+
+            // Prepare for the smaller multiplications. These are summed/subtracted with SIMD and
+            // we don't have to care about the element orders, since both matrices have them the
+            // same.
+            let m1l = op!(bc, a11 + a22);
+            let m1r = op!(bc, b11 + b22);
+            let m2l = op!(bc, a21 + a22);
+            let m3r = op!(bc, b12 - b22);
+            let m4r = op!(bc, b21 - b11);
+            let m5l = op!(bc, a11 + a12);
+            let m6l = op!(bc, a21 - a11);
+            let m6r = op!(bc, b11 + b12);
+            let m7l = op!(bc, a21 - a11);
+            let m7r = op!(bc, b21 + b22);
+
+            // Run the sub-multiplications, possibly across multiple threads
+            let (mut m1, mut m2, mut m3, mut m4, mut m5, mut m6, mut m7) =
+                tuplify!(7, bc.next().unwrap());
+            let mut tasks = [
+                (&mut m1, m1l, m1r),
+                (&mut m2, m2l, b11),
+                (&mut m3, a11, m3r),
+                (&mut m4, a22, m4r),
+                (&mut m5, m5l, b22),
+                (&mut m6, m6l, m6r),
+                (&mut m7, m7l, m7r),
+            ];
+            Dist::run(size, &mut tasks, |&mut (ref mut r, ref a, ref b)| {
+                step::<Dist, Mult>(r, a, b, s, frag);
+            });
+
+            // Consolidate the results
+            op!(r11 => m1 + m4 - m5 + m7);
+            op!(r12 => m3 + m5);
+            op!(r21 => m2 + m4);
+            op!(r22 => m1 - m2 + m3 + m6);
+        }
+    }
+    step::<Dist, Mult>(&mut result.content, &a.content, &b.content, a.size, Frag::USIZE);
 
     result
 }
@@ -298,6 +393,9 @@ mod tests {
             approx_eq(expected.clone(), result);
             let ra_z = multiply::<_, RayonDistribute<U32>, Mult>(&a_z, &b_z);
             let result = Simple::from(&ra_z);
+            approx_eq(expected.clone(), result);
+            let rs_z = strassen::<_, RayonDistribute<U32>, Mult>(&a_z, &b_z);
+            let result = Simple::from(&rs_z);
             approx_eq(expected, result);
         }
     }
