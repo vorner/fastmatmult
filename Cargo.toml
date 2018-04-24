@@ -17,3 +17,12 @@ serde_derive = "~1"
 smallvec = "~0.6"
 structopt = "~0.2"
 typenum = "~1"
+
+[profile.release]
+lto = true
+codegen-units = 1
+#panic = 'abort' # Doesn't seem to work right now :-(
+incremental = false
+overflow-checks = false
+debug-assertions = false
+opt-level = 3

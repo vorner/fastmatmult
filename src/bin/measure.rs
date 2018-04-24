@@ -105,7 +105,10 @@ fn run() -> Result<(), Error> {
     let simple = if opts.cheap {
         None
     } else {
-        Some(measure("simple", || fastmatmult::simple::multiply(&m1, &m2)))
+        let simple = measure("simple", || fastmatmult::simple::multiply(&m1, &m2));
+        let col_cp = measure("colcp", || fastmatmult::simple::multiply_col_cp(&m1, &m2));
+        assert_eq!(simple, col_cp);
+        Some(simple)
     };
     let simple = simple.as_ref();
 

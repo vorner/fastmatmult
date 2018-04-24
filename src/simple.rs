@@ -1,11 +1,13 @@
 use std::fs::File;
 use std::io::{BufReader, BufWriter};
+use std::iter;
 use std::ops::{Index, IndexMut};
 use std::path::Path;
 
 use bincode;
 use failure::Error;
 use rand::{self, Rng};
+use smallvec::SmallVec;
 
 use super::Element;
 
@@ -152,7 +154,20 @@ pub(crate) fn multiply_add(into: &mut SliceMut, a: &Slice, b: &Slice) {
 pub fn multiply(a: &Matrix, b: &Matrix) -> Matrix {
     let mut r = Matrix::sized(b.width, a.height);
 
+    // These serve two purposes:
+    // * Sanity check the matrix implementations.
+    // * Allow the optimiser to remove the range checks from the below indexing.
+    a.validate();
+    b.validate();
+    r.validate();
+
     multiply_add(&mut r.slice_mut(), &a.slice(), &b.slice());
+
+    r
+}
+
+pub fn multiply_col_cp(a: &Matrix, b: &Matrix) -> Matrix {
+    let mut r = Matrix::sized(b.width, a.height);
 
     // These serve two purposes:
     // * Sanity check the matrix implementations.
@@ -160,6 +175,27 @@ pub fn multiply(a: &Matrix, b: &Matrix) -> Matrix {
     a.validate();
     b.validate();
     r.validate();
+
+    let w = r.width;
+    let h = r.height;
+    let l = a.width;
+
+    let mut col = iter::repeat(0.)
+        .take(l)
+        .collect::<SmallVec<[_; 512]>>();
+
+    for x in 0..w {
+        // Copy the column out, so it's more cache-friendly
+        for p in 0..l {
+            col[p] = b[(x, p)];
+        }
+
+        for y in 0..h {
+            for p in 0..l {
+                r[(x, y)] += a[(p, y)] * col[p];
+            }
+        }
+    }
 
     r
 }
@@ -229,6 +265,15 @@ mod tests {
         assert_eq!(rect, left_rect);
         let right_rect = multiply(&rect, &Matrix::identity(2));
         assert_eq!(rect, right_rect);
+    }
+
+    #[test]
+    fn col_cp() {
+        for shift in 0..7 {
+            let a = Matrix::random(1 << shift, 1 << shift);
+            let b = Matrix::random(1 << shift, 1 << shift);
+            assert_eq!(multiply(&a, &b), multiply_col_cp(&a, &b));
+        }
     }
 
     #[test]
