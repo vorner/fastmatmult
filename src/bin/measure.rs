@@ -28,6 +28,12 @@ struct Opts {
     input1: PathBuf,
     #[structopt(parse(from_os_str))]
     input2: PathBuf,
+    /// Skip over some expensive computations.
+    ///
+    /// This is to be able to measure somewhat larger inputs, so skipping the really slow ones
+    /// helps.
+    #[structopt(short = "c", long = "cheap")]
+    cheap: bool,
 }
 
 fn measure<N: Display, R, F: FnOnce() -> R>(name: N, f: F) -> R {
@@ -59,21 +65,16 @@ where
     }
 }
 
-fn block<Frag>(a: &Matrix, b: &Matrix, expected: &Matrix)
+fn block<Frag>(a: &Matrix, b: &Matrix, expected: Option<&Matrix>)
 where
     Frag: Unsigned + Default,
 {
     if a.width() < Frag::USIZE {
         return;
     }
-    block_inner::<DontDistribute, SimpleMultiplyAdd, Frag>("", a, b, Some(expected));
-    block_inner::<RayonDistribute<Frag>, SimpleMultiplyAdd, Frag>("-paral", a, b, Some(expected));
-    block_inner::<RayonDistribute<U256>, SimpleMultiplyAdd, Frag>(
-        "-paral-cutoff",
-        a,
-        b,
-        Some(expected)
-    );
+    block_inner::<DontDistribute, SimpleMultiplyAdd, Frag>("", a, b, expected);
+    block_inner::<RayonDistribute<Frag>, SimpleMultiplyAdd, Frag>("-paral", a, b, expected);
+    block_inner::<RayonDistribute<U256>, SimpleMultiplyAdd, Frag>("-paral-cutoff", a, b, expected);
     if Frag::USIZE >= 4 {
         block_inner::<DontDistribute, SimdMultiplyAdd, Frag>("-simd", a, b, None);
         block_inner::<RayonDistribute<Frag>, SimdMultiplyAdd, Frag>("-simd-paral", a, b, None);
@@ -84,6 +85,16 @@ where
             None
         );
     }
+    if Frag::USIZE >= 32 {
+        measure(format!("strassen-{}", Frag::USIZE), || {
+            let a_z = ZMat::<Frag>::from(a);
+            let b_z = ZMat::<Frag>::from(b);
+            let r_z = measure(format!("strassen-inner-{}", Frag::USIZE), || {
+                fastmatmult::znot::strassen::<_, RayonDistribute<Frag>, SimdMultiplyAdd>(&a_z, &b_z)
+            });
+            Matrix::from(&r_z)
+        });
+    }
 }
 
 fn run() -> Result<(), Error> {
@@ -91,23 +102,30 @@ fn run() -> Result<(), Error> {
     let m1 = Matrix::load(&opts.input1)?;
     let m2 = Matrix::load(&opts.input2)?;
 
-    let simple = measure("simple", || fastmatmult::simple::multiply(&m1, &m2));
+    let simple = if opts.cheap {
+        None
+    } else {
+        Some(measure("simple", || fastmatmult::simple::multiply(&m1, &m2)))
+    };
+    let simple = simple.as_ref();
 
     let _simd = measure("simd", || fastmatmult::simd::multiply(&m1, &m2));
     // Not checking equality, because simd does slightly different results due to reordering of the
     // summing
 
-    block::<U1>(&m1, &m2, &simple);
-    block::<U2>(&m1, &m2, &simple);
-    block::<U4>(&m1, &m2, &simple);
-    block::<U8>(&m1, &m2, &simple);
-    block::<U16>(&m1, &m2, &simple);
-    block::<U32>(&m1, &m2, &simple);
-    block::<U64>(&m1, &m2, &simple);
-    block::<U128>(&m1, &m2, &simple);
-    block::<U256>(&m1, &m2, &simple);
-    block::<U512>(&m1, &m2, &simple);
-    block::<U1024>(&m1, &m2, &simple);
+    if !opts.cheap {
+        block::<U1>(&m1, &m2, simple);
+        block::<U2>(&m1, &m2, simple);
+        block::<U4>(&m1, &m2, simple);
+        block::<U8>(&m1, &m2, simple);
+        block::<U16>(&m1, &m2, simple);
+        block::<U32>(&m1, &m2, simple);
+    }
+    block::<U64>(&m1, &m2, simple);
+    block::<U128>(&m1, &m2, simple);
+    block::<U256>(&m1, &m2, simple);
+    block::<U512>(&m1, &m2, simple);
+    block::<U1024>(&m1, &m2, simple);
 
     Ok(())
 }
