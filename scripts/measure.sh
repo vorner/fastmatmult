@@ -2,6 +2,9 @@
 
 set -ex
 
+export RUSTFLAGS='-C target-cpu=native'
+export CARGO_INCREMENTAL=
+
 run() {
 	SIZE=$1
 	CHEAP=$2
