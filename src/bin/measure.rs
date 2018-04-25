@@ -116,7 +116,7 @@ fn run() -> Result<(), Error> {
     };
     let simple = simple.as_ref();
 
-    let _simd = measure("simd", || fastmatmult::simd::multiply(&m1, &m2));
+    measure("simd", || fastmatmult::simd::multiply(&m1, &m2));
     // Not checking equality, because simd does slightly different results due to reordering of the
     // summing
 
