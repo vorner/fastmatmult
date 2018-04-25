@@ -65,19 +65,23 @@ where
     }
 }
 
-fn block<Frag>(a: &Matrix, b: &Matrix, expected: Option<&Matrix>)
+fn block<Frag>(a: &Matrix, b: &Matrix, expected: Option<&Matrix>, cheap: bool)
 where
     Frag: Unsigned + Default,
 {
     if a.width() < Frag::USIZE {
         return;
     }
-    block_inner::<DontDistribute, SimpleMultiplyAdd, Frag>("", a, b, expected);
-    block_inner::<RayonDistribute<Frag>, SimpleMultiplyAdd, Frag>("-paral", a, b, expected);
+    if !cheap {
+        block_inner::<DontDistribute, SimpleMultiplyAdd, Frag>("", a, b, expected);
+        block_inner::<RayonDistribute<Frag>, SimpleMultiplyAdd, Frag>("-paral", a, b, expected);
+    }
     block_inner::<RayonDistribute<U256>, SimpleMultiplyAdd, Frag>("-paral-cutoff", a, b, expected);
     if Frag::USIZE >= 4 {
-        block_inner::<DontDistribute, SimdMultiplyAdd, Frag>("-simd", a, b, None);
-        block_inner::<RayonDistribute<Frag>, SimdMultiplyAdd, Frag>("-simd-paral", a, b, None);
+        if !cheap {
+            block_inner::<DontDistribute, SimdMultiplyAdd, Frag>("-simd", a, b, None);
+            block_inner::<RayonDistribute<Frag>, SimdMultiplyAdd, Frag>("-simd-paral", a, b, None);
+        }
         block_inner::<RayonDistribute<U256>, SimdMultiplyAdd, Frag>(
             "-simd-paral-cutoff",
             a,
@@ -117,18 +121,18 @@ fn run() -> Result<(), Error> {
     // summing
 
     if !opts.cheap {
-        block::<U1>(&m1, &m2, simple);
-        block::<U2>(&m1, &m2, simple);
-        block::<U4>(&m1, &m2, simple);
-        block::<U8>(&m1, &m2, simple);
-        block::<U16>(&m1, &m2, simple);
-        block::<U32>(&m1, &m2, simple);
+        block::<U1>(&m1, &m2, simple, opts.cheap);
+        block::<U2>(&m1, &m2, simple, opts.cheap);
+        block::<U4>(&m1, &m2, simple, opts.cheap);
+        block::<U8>(&m1, &m2, simple, opts.cheap);
+        block::<U16>(&m1, &m2, simple, opts.cheap);
+        block::<U32>(&m1, &m2, simple, opts.cheap);
     }
-    block::<U64>(&m1, &m2, simple);
-    block::<U128>(&m1, &m2, simple);
-    block::<U256>(&m1, &m2, simple);
-    block::<U512>(&m1, &m2, simple);
-    block::<U1024>(&m1, &m2, simple);
+    block::<U64>(&m1, &m2, simple, opts.cheap);
+    block::<U128>(&m1, &m2, simple, opts.cheap);
+    block::<U256>(&m1, &m2, simple, opts.cheap);
+    block::<U512>(&m1, &m2, simple, opts.cheap);
+    block::<U1024>(&m1, &m2, simple, opts.cheap);
 
     Ok(())
 }
