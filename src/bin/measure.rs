@@ -34,6 +34,10 @@ struct Opts {
     /// helps.
     #[structopt(short = "c", long = "cheap")]
     cheap: bool,
+
+    /// Run only the simple multiplication.
+    #[structopt(short = "s", long = "simple-only")]
+    simple_only: bool,
 }
 
 fn measure<N: Display, R, F: FnOnce() -> R>(name: N, f: F) -> R {
@@ -110,6 +114,9 @@ fn run() -> Result<(), Error> {
         None
     } else {
         let simple = measure("simple", || fastmatmult::simple::multiply(&m1, &m2));
+        if opts.simple_only {
+            return Ok(());
+        }
         let col_cp = measure("colcp", || fastmatmult::simple::multiply_col_cp(&m1, &m2));
         assert_eq!(simple, col_cp);
         Some(simple)
