@@ -4,19 +4,26 @@
   <meta charset="UTF-8">
   <title>{{title}}</title>
   {{{style}}}
-  <script src="remark.min.js"></script>  
+  <script src="remark.min.js"></script>
+  <link rel="stylesheet" href="katex.min.css">
+  <script src="katex.min.js"></script>
+  <script src="auto-render.min.js"></script>
   <script>
     function create() {
-      return remark.create({
+      var show = remark.create({
         {{{source}}},
         ratio: '16:9',
         highlightLines: true,
         countIncrementalSlides: false,
         highlightStyle: 'github'
       });
+      show.on('showSlide', function (slide) {
+          renderMathInElement(document.body);
+      });
+      return show;
     }
   </script>
 </head>
-<body onload="slideshow = create()">
+<body onload="slideshow = create(); renderMathInElement(document.body)">
 </body>
 </html>
