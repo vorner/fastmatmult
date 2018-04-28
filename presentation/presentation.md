@@ -109,3 +109,243 @@ for x in 0..w {
 
 - That's better, but not enough
 - About 5× speedup (and no actual work done)
+
+---
+
+# Step 2: Find the slow part
+
+* Optimizing takes effort
+  - We want to optimize where it makes sense
+* Guessing is often wrong
+* Let's use a profiler
+  - `perf` is usually a good choice
+  - `FlameGraph` is a nice extension
+
+```
+99.89%    99.58%  measure  measure
+        |
+        ---fastmatmult::simple::multiply_add
+```
+
+---
+
+# Step 2: Find the slow part
+
+.center[<img src="fg.svg" height="95%" width="95%">]
+
+---
+
+# Step 3: Find why it is slow
+
+* Doing too much overall
+* IO
+* Syscalls
+* Thread synchronization
+* Branch mispredictions
+* Waiting for memory
+
+---
+
+# Step 3: Find why it is slow
+
+TODO: Measure again on hydra
+
+* Common sense and `htop` rules out IO, syscalls and threads
+* `perf stat` gives more info (1024×1024)
+  - 80G cycles vs. 15G instructions ‒ 5.3 cycle per instruction
+  - 2.6G cache accesses, 2.5G misses ‒ 96% misses
+  - 2.2G branches, 4.5M misses
+???
+
+* Maybe a good time to describe how perf works
+* Perf stat and summing up
+* Counter for events, when it overflows, a sample is taken
+--
+
+* Mostly cache misses are to blame
+* Number of instructions too
+
+---
+
+# Memory hierarchy
+
+TODO: Schema of memory hierarchy
+
+???
+
+* Further away from CPU is more mem, but slower
+* From some point shared
+* Cache lines, evictions
+* Preloading
+
+---
+
+# Memory hierarchy: NUMA
+
+TODO: Schema of memory hierarchy with NUMA
+
+???
+
+Note that it can be even worse...
+
+---
+
+# Step 4: Do some research
+
+* Is there a better algorithm?
+* Could I precompute or reuse something?
+
+--
+
+- Z-order layout
+  * Good for caches
+- Strassen algorithm
+
+???
+
+* Let's start with the layout, it looks simpler
+* Postpone strassen algorithm for later on, it looks complex
+
+---
+
+# Z-Order
+
+* Split matrix in quarters
+  - Can be taken as matrix 2×2
+  - Matrix multiplication works on the quarters
+* Each quarter is continuous in memory
+* Each quarter is encoded recursively
+* At certain level, the whole matrix fits into cache
+
+TODO: Image of the Z-Order
+TODO: Image of the multiplication
+TODO: Image of the recursion and how it fits into cache
+TODO: Some code
+
+---
+
+# Problems with recursion
+
+* 2048: 178s
+* 4096: 1423s
+
+- There's a cost to recursion
+  * It dominates on small tasks
+  * Small tasks already fit into cache
+- Let's do a hybrid approach
+  * Switch to simple from some size
+
+|    size  |    4    |   8    |    16    |    32    |
+|----------|--------:|-------:|---------:|---------:|
+| **2048** |   35s   |   *33s*|   34s    |    37s   |
+| **4096** |   272s  |  *266s*|   283s   |   299s   |
+
+???
+
+* General pattern of hybrid approach
+* Where one algorithm is faster on large inputs and another on small ones
+
+---
+
+# Parallelism
+
+* Computing of the quarters is independent
+* We can distribute the work between cores
+* There's a synchronization cost
+  - Makes no sense to share tiny tasks
+* Can't expect N× speedup
+  - Shared memory bandwidth, caches
+  - Shared parts (FPU, scheduler)
+  - Cooling and power units
+
+---
+
+# Thread pools (Rayon)
+
+TODO: Code
+
+---
+
+# Results
+
+* Distributing down to the small matrices
+* Not distributing smaller than 256
+
+|    size   |    2     |    4     |    8    |   16    |   32   |
+|-----------|---------:|---------:|--------:|--------:|-------:|
+| **2048s** |    16s   |    6s    |    5s   |   5s    |   5s   |
+| **2048c** |     9s   |    5s    |    5s   |   5s    |   5s   |
+| **4096s** |   152s   |   48s    |   40s   | *38s*   |  41s   |
+| **4096c** |    68s   |   41s    |   39s   |  39s    |  42s   |
+
+---
+
+# SIMD
+
+* Usually, one instruction ‒ one result
+* SIMD ‒ a vector in each register
+* For example 16×float
+* Needs aligned data or load them into the registers
+* Fast for long runs
+* Stronger hints for cache pre-loading
+* Matrices ‒ problems with column access
+  - There's acceleration for that, but still slow
+* Let's use a library (`faster`)
+  - For portability and ease of use
+  - Needs nightly Rust now, going to stabilize soon
+
+---
+
+# SIMD
+
+```rust
+let columns = b.content.simd_iter(f32s(0.));
+let columns = columns.stride(b.width, &pads);
+let mut column_data = iter::repeat(0.0).take(b.height).collect();
+for (x, mut column) in columns.into_iter().enumerate() {
+*   column.scalar_fill(&mut column_data);
+    for y in 0..h {
+        let row = &a.content[y * l .. (y + 1) * l];
+        into[(x, y)] += (row.simd_iter(f32s(0.)),
+                column_data.simd_iter(f32s(0.)))
+            .zip()
+            .simd_reduce(f32s(0.0), |acc, (a, b)| acc + a * b)
+            .sum();
+    }
+}
+```
+
+???
+
+* Describe the reason for that highlighted line
+* Made it actually much faster
+
+---
+
+# Speeds
+
+* Can be combined with other solutions
+  - Goes a bit against the recursive/cache optimisation
+  - Recursive, parallelized, with 256 sized fragments
+* The column-copy trick alone helps only a little
+
+|   size    |   simple    |   column   |   simd   |     combined   |
+|-----------|------------:|-----------:|---------:|---------------:|
+| **2048**  |   323s      |    35s     |    6s    |      0.7s      |
+| **4096**  |  2930s      |   277s     |   44s    |       30s      |
+
+---
+
+# Strassen
+
+* Similar to the recursive
+* Reduces the number of smaller multiplications to 7
+* At the cost of some additions and removals
+  - Isn't worth for small inputs
+  - Wins on large ones
+* Exact formulae at [wikipedia](https://en.wikipedia.org/wiki/Strassen_algorithm) or elsewhere
+
+- 2048: 0.6s
+- 4096: 4s
+- 8192: 27s
+- 16384: 182s
