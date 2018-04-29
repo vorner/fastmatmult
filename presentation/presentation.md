@@ -52,11 +52,13 @@ TODO: Graph for armadillo
 
 # Recap: matrix multiplication
 
+.left-column[
 * \\(C = A \times B\\)
 * \\(C\_{x, y}\\) = \\(\sum\_{i=1}^n A\_{i, y}\cdot B\_{x, i} \\)
 * \\(O(n^3)\\)
+]
 
-TODO: Image at the right hand side
+.right-column[![Multiplication](mult.svg)]
 
 ---
 
@@ -349,3 +351,10 @@ for (x, mut column) in columns.into_iter().enumerate() {
 - 4096: 4s
 - 8192: 27s
 - 16384: 182s
+
+---
+
+# TODO
+
+* Links to the code
+* Graphs
