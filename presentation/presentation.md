@@ -53,6 +53,7 @@ TODO: Graph for armadillo
 # Recap: matrix multiplication
 
 .left-column[
+* Cell is a dot-product of a row from the left and column from the right
 * \\(C = A \times B\\)
 * \\(C\_{x, y}\\) = \\(\sum\_{i=1}^n A\_{i, y}\cdot B\_{x, i} \\)
 * \\(O(n^3)\\)
@@ -92,7 +93,7 @@ for x in 0..w {
 * Sell something else to the customer
   - Sum the matrices instead of multiplying
   - They won't notice, will they?
-* Promise better speed for next version
+* Promise better speed for the next version
   - They should have motivation to buy it
 * Become a shepherd
   - 🐑 🐑 🐐 🐑
@@ -103,6 +104,9 @@ for x in 0..w {
 
 - And remember to turn **the optimizations** on
 - `cargo run --release`
+- Possibly with CPU-specific features
+  * `-march=native`
+  * `-C target-cpu=native`
 --
 
 * 1024: 15s
@@ -146,19 +150,23 @@ for x in 0..w {
 * Branch mispredictions
 * Waiting for memory
 
+???
+
+* I'll explain the ones that turn out to be our problems.
+* Others on request.
+
 ---
 
 # Step 3: Find why it is slow
 
-TODO: Measure again on hydra
-
 * Common sense and `htop` rules out IO, syscalls and threads
 * `perf stat` gives more info (1024×1024)
-  - 80G cycles vs. 15G instructions ‒ 5.3 cycle per instruction
-  - 2.6G cache accesses, 2.5G misses ‒ 96% misses
-  - 2.2G branches, 4.5M misses
+  - 60G cycles vs. 30G instructions ‒ 2 cycles per instruction
+  - 1.5G cache accesses vs. 1G cache misses
+  - 4G branches vs. 1M mispredicted
 ???
 
+* Point out the low instruction vs. cycle count (hyperscalar processor)
 * Maybe a good time to describe how perf works
 * Perf stat and summing up
 * Counter for events, when it overflows, a sample is taken
@@ -169,9 +177,31 @@ TODO: Measure again on hydra
 
 ---
 
+# Perf
+
+```
+ Performance counter stats for './target/release/measure -s a.out b.out':
+
+    60,535,345,914      cycles
+    30,287,912,793      instructions              #    0.50  insn per cycle
+     4,340,795,281      branches
+         1,160,771      branch-misses             #    0.03% of all branches
+     1,433,441,916      cache-references
+     1,077,840,136      cache-misses              #   75.192 % of all cache refs
+
+      14.154347044 seconds time elapsed
+```
+
+---
+
 # Memory hierarchy
 
-TODO: Schema of memory hierarchy
+![Memory hierarchy](hier.svg)
+
+* Cache lines, pages, predictors...
+* Better to access recently accessed data
+* Or data close to recently accessed data
+* Linear or other predictable pattern is good
 
 ???
 
@@ -184,7 +214,7 @@ TODO: Schema of memory hierarchy
 
 # Memory hierarchy: NUMA
 
-TODO: Schema of memory hierarchy with NUMA
+![Numa hierarchy](numa.svg)
 
 ???
 
