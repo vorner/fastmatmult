@@ -14,6 +14,10 @@ class: impact
 # {{title}}
 ## Optimization case study with matrix multiplication
 
+Michal Vaner
+
+[michal.vaner@avast.com](mailto:michal.vaner@avast.com)
+
 ---
 
 # Goals
@@ -222,6 +226,12 @@ Note that it can be even worse...
 
 ---
 
+# Matrix layout in memory
+
+TODO: Image
+
+---
+
 # Step 4: Do some research
 
 * Is there a better algorithm?
@@ -249,17 +259,50 @@ Note that it can be even worse...
 * Each quarter is encoded recursively
 * At certain level, the whole matrix fits into cache
 
-TODO: Image of the Z-Order
-TODO: Image of the multiplication
-TODO: Image of the recursion and how it fits into cache
-TODO: Some code
+---
+
+# Z-Order: splitting schema
+
+.left-column[
+.center[![Z Order](z-order.svg)]
+]
+
+--
+
+.right-column[
+.center[![Z order 2](z-order-2.svg)]
+]
+
+---
+
+# Z-Order: multiplication
+
+```rust
+fn mult(r: &mut [Element], a: &[Element], b: &[Element], size: usize) {
+    if size == frag {
+        r[0] += a[0] * b[0];
+    } else {
+        let s = size / 2;
+        let (a11, a12, a21, a22) = quads!(a);
+        let (b11, b12, b21, b22) = quads!(b);
+        let (r11, r12, r21, r22) = quads!(mut r);
+
+        mult(r11, a11, b11, s);
+        mult(r11, a12, b21, s);
+        ...
+        mult(r22, a22, b22, s);
+    }
+}
+```
 
 ---
 
 # Problems with recursion
 
+.left-column[
 * 2048: 178s
 * 4096: 1423s
+* About 2× better
 
 - There's a cost to recursion
   * It dominates on small tasks
@@ -271,6 +314,11 @@ TODO: Some code
 |----------|--------:|-------:|---------:|---------:|
 | **2048** |   35s   |   *33s*|   34s    |    37s   |
 | **4096** |   272s  |  *266s*|   283s   |   299s   |
+]
+
+.right-column[
+![Recursion](recursion.svg)
+]
 
 ???
 
@@ -294,14 +342,30 @@ TODO: Some code
 
 # Thread pools (Rayon)
 
-TODO: Code
+```rust
+fn run<I: Send, F: Fn(&mut I) + Send + Sync>(
+    size: usize,
+    tasks: &mut [I], f: F
+) {
+    if size >= Limit::USIZE {
+        tasks
+            // Potentially runs on multiple threads
+*           .into_par_iter()
+            .for_each(f);
+    } else {
+        for t in tasks {
+            f(t);
+        }
+    }
+}
+```
 
 ---
 
 # Results
 
-* Distributing down to the small matrices
-* Not distributing smaller than 256
+* Distributing down to the small matrices (`s`)
+* Not distributing smaller than 256 (`c`)
 
 |    size   |    2     |    4     |    8    |   16    |   32   |
 |-----------|---------:|---------:|--------:|--------:|-------:|
@@ -312,19 +376,24 @@ TODO: Code
 
 ---
 
-# SIMD
+# SIMD (Single Instruction Multiple Data)
 
+.left-column[
 * Usually, one instruction ‒ one result
 * SIMD ‒ a vector in each register
-* For example 16×float
-* Needs aligned data or load them into the registers
-* Fast for long runs
-* Stronger hints for cache pre-loading
-* Matrices ‒ problems with column access
-  - There's acceleration for that, but still slow
+* For example registers for 16 floats
+* Fast on long arrays
+* Stronger hints for cache pre-loading?
+* Problems with column access
+  - Acceleration for that, still slow
 * Let's use a library (`faster`)
   - For portability and ease of use
   - Needs nightly Rust now, going to stabilize soon
+]
+
+.right-column[
+![SIMD](simd.svg)
+]
 
 ---
 
@@ -341,7 +410,7 @@ for (x, mut column) in columns.into_iter().enumerate() {
         into[(x, y)] += (row.simd_iter(f32s(0.)),
                 column_data.simd_iter(f32s(0.)))
             .zip()
-            .simd_reduce(f32s(0.0), |acc, (a, b)| acc + a * b)
+*           .simd_reduce(f32s(0.0), |acc, (a, b)| acc + a * b)
             .sum();
     }
 }
@@ -349,7 +418,7 @@ for (x, mut column) in columns.into_iter().enumerate() {
 
 ???
 
-* Describe the reason for that highlighted line
+* Describe the reason for that first highlighted line
 * Made it actually much faster
 
 ---
@@ -361,7 +430,7 @@ for (x, mut column) in columns.into_iter().enumerate() {
   - Recursive, parallelized, with 256 sized fragments
 * The column-copy trick alone helps only a little
 
-|   size    |   simple    |   column   |   simd   |     combined   |
+|   size    |   simple    |   column   |   simd   | recursive+simd |
 |-----------|------------:|-----------:|---------:|---------------:|
 | **2048**  |   323s      |    35s     |    6s    |      0.7s      |
 | **4096**  |  2930s      |   277s     |   44s    |       30s      |
@@ -384,7 +453,12 @@ for (x, mut column) in columns.into_iter().enumerate() {
 
 ---
 
+# Source code
+
+* https://github.com/vorner/fastmatmult
+* Somewhat templated to assemble all the measured variants
+* Needs specific version of rust nightly
+
 # TODO
 
-* Links to the code
 * Graphs
