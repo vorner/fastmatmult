@@ -39,7 +39,8 @@ Michal Vaner
 
 # Case study
 
-* Two huge matrices, compute a product
+.left-column[
+* Two matrices, compute a product
 * Composed of floats
 * Simplification for educational purposes
   - Square size
@@ -49,8 +50,11 @@ Michal Vaner
   - 16384: 2783s (46 minutes)
   - Spoiler: we're going to do better 😈
 * Another spoiler: We'll reach 1000× speedup
+]
 
-TODO: Graph for armadillo
+.right-column[
+![Armadillo](arm.svg)
+]
 
 ---
 
@@ -228,7 +232,9 @@ Note that it can be even worse...
 
 # Matrix layout in memory
 
-TODO: Image
+.center[
+![Matrix & cache lines](cache-matrix.svg)
+]
 
 ---
 
