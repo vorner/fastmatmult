@@ -4,7 +4,7 @@
 
 int main() {
 
-	for (size_t i = 10; i < 15; i ++) {
+	for (size_t i = 8; i < 15; i ++) {
 		std::cout << "Generating matrices" << std::endl;
 		size_t size = 1 << i;
 		arma::fmat a = arma::randu<arma::fmat>(size, size);

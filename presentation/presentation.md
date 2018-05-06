@@ -285,7 +285,7 @@ Note that it can be even worse...
 
 ```rust
 fn mult(r: &mut [Element], a: &[Element], b: &[Element], size: usize) {
-    if size == frag {
+    if size == 1 {
         r[0] += a[0] * b[0];
     } else {
         let s = size / 2;
@@ -324,6 +324,8 @@ fn mult(r: &mut [Element], a: &[Element], b: &[Element], size: usize) {
 
 .right-column[
 ![Recursion](recursion.svg)
+
+* Another 5× speedup
 ]
 
 ???
@@ -379,6 +381,11 @@ fn run<I: Send, F: Fn(&mut I) + Send + Sync>(
 | **2048c** |     9s   |    5s    |    5s   |   5s    |   5s   |
 | **4096s** |   152s   |   48s    |   40s   | *38s*   |  41s   |
 | **4096c** |    68s   |   41s    |   39s   |  39s    |  42s   |
+
+* Further 6× speedup on 8-core CPU
+* Can expect more with more cores
+  - Measured 14× on machine with 2×10 cores with 2×HT (40 virtual cores, 20
+    physical)
 
 ---
 
@@ -439,7 +446,7 @@ for (x, mut column) in columns.into_iter().enumerate() {
 |   size    |   simple    |   column   |   simd   | recursive+simd |
 |-----------|------------:|-----------:|---------:|---------------:|
 | **2048**  |   323s      |    35s     |    6s    |      0.7s      |
-| **4096**  |  2930s      |   277s     |   44s    |       30s      |
+| **4096**  |  2930s      |   277s     |   44s    |       6s      |
 
 ---
 
@@ -456,6 +463,8 @@ for (x, mut column) in columns.into_iter().enumerate() {
 - 4096: 4s
 - 8192: 27s
 - 16384: 182s
+  * 2783s for Armadillo
+  * 348s for theoretical parallelized Armadillo
 
 ---
 
@@ -464,7 +473,28 @@ for (x, mut column) in columns.into_iter().enumerate() {
 * https://github.com/vorner/fastmatmult
 * Somewhat templated to assemble all the measured variants
 * Needs specific version of rust nightly
+  - SIMD is about to stabilize, therefore a lot of last-minute changes.
 
-# TODO
+---
 
-* Graphs
+# Buldozer 8-core
+
+.center[
+![Buldozer](buldozer.svg)
+]
+
+---
+
+# Xeon 2×10×2HT
+
+.center[
+![40-cores](beast.svg)
+]
+
+---
+
+# Celeron 4-core
+
+.center[
+![Celeron](celeron.svg)
+]
