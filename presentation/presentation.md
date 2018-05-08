@@ -468,6 +468,28 @@ for (x, mut column) in columns.into_iter().enumerate() {
 
 ---
 
+# Final profile
+
+```
+ Performance counter stats for './target/release/strass a.out b.out':
+
+   115,374,630,652      cycles
+   187,871,575,042      instructions              #    1.63  insn per cycle
+    12,756,647,765      branches
+       163,876,845      branch-misses             #    1.28% of all branches
+     3,187,674,343      cache-references
+       100,655,288      cache-misses              #    3.158 % of all cache refs
+
+       6.254030767 seconds time elapsed
+```
+
+???
+
+* As can be seen, it is not only faster, but we got much better in instructions
+  per cycle & cache-misses
+
+---
+
 # Source code
 
 * https://github.com/vorner/fastmatmult
