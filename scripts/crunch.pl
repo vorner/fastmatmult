@@ -25,5 +25,7 @@ print "set terminal svg size 400, 400 background rgb 'white'";
 print "set output 'arm.svg'";
 print "set log xyz";
 print "set key right bottom";
+print "set xlabel \"Side of the matrix\"";
+print "set ylabel \"Time (seconds)\"";
 
 print "plot 'arm.dat' title 'Armadillo' with linespoints lt 1 lc rgb 'red'";

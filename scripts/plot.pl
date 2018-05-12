@@ -31,6 +31,8 @@ print "set terminal svg size 700, 450 background rgb 'white'";
 print "set output 'graph.svg'";
 print "set log xyz";
 print "set key right bottom";
+print "set xlabel \"Side of the matrix\"";
+print "set ylabel \"Time (seconds)\"";
 
 while (my ($algo, $data) = each %data) {
 	open my $out, '>', "$algo.dat" or die "Couldn't write $algo.dat: $!\n";
