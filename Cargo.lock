@@ -151,7 +151,7 @@ dependencies = [
 [[package]]
 name = "faster"
 version = "0.4.3"
-source = "git+https://github.com/vorner/faster?branch=collect#d119d0b9ab070a351b97b1742388c6dbd12ebe5f"
+source = "git+https://github.com/AdamNiederer/faster/#ee605f3627d14c78889d5cda16901a4224912d8d"
 dependencies = [
  "stdsimd 0.0.4-1 (git+https://github.com/AdamNiederer/stdsimd?branch=fix-bft-build)",
 ]
@@ -162,7 +162,7 @@ version = "0.1.0"
 dependencies = [
  "bincode 1.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "failure 0.1.1 (registry+https://github.com/rust-lang/crates.io-index)",
- "faster 0.4.3 (git+https://github.com/vorner/faster?branch=collect)",
+ "faster 0.4.3 (git+https://github.com/AdamNiederer/faster/)",
  "itertools 0.7.8 (registry+https://github.com/rust-lang/crates.io-index)",
  "rand 0.4.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "rayon 1.0.1 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -478,7 +478,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 "checksum either 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)" = "3be565ca5c557d7f59e7cfcf1844f9e3033650c929c6566f511e8005f205c1d0"
 "checksum failure 0.1.1 (registry+https://github.com/rust-lang/crates.io-index)" = "934799b6c1de475a012a02dab0ace1ace43789ee4b99bcfbf1a2e3e8ced5de82"
 "checksum failure_derive 0.1.1 (registry+https://github.com/rust-lang/crates.io-index)" = "c7cdda555bb90c9bb67a3b670a0f42de8e73f5981524123ad8578aafec8ddb8b"
-"checksum faster 0.4.3 (git+https://github.com/vorner/faster?branch=collect)" = "<none>"
+"checksum faster 0.4.3 (git+https://github.com/AdamNiederer/faster/)" = "<none>"
 "checksum fuchsia-zircon 0.3.3 (registry+https://github.com/rust-lang/crates.io-index)" = "2e9763c69ebaae630ba35f74888db465e49e259ba1bc0eda7d06f4a067615d82"
 "checksum fuchsia-zircon-sys 0.3.3 (registry+https://github.com/rust-lang/crates.io-index)" = "3dcaa9ae7725d12cdb85b3ad99a434db70b468c09ded17e012d86b5c1010f7a7"
 "checksum itertools 0.7.8 (registry+https://github.com/rust-lang/crates.io-index)" = "f58856976b776fedd95533137617a02fb25719f40e7d9b01c7043cd65474f450"

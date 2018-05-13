@@ -8,7 +8,7 @@ publish = false
 [dependencies]
 bincode = "~1"
 failure = "~0.1"
-faster = { git = "https://github.com/vorner/faster", branch = "collect" }
+faster = { git = "https://github.com/AdamNiederer/faster/" }
 itertools = "~0.7"
 rand = "~0.4"
 rayon = "~1"

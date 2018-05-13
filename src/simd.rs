@@ -19,7 +19,7 @@ pub(crate) fn multiply_add(into: &mut SliceMut, a: &Slice, b: &Slice) {
     let columns = b.content
         .simd_iter(f32s(0.));
     let columns = columns
-        .stride::<SmallVec<[_; 512]>>(b.width, &pads);
+        .stride_into::<SmallVec<[_; 512]>>(b.width, &pads);
     let mut column_data = iter::repeat(0.0)
         .take(b.height)
         .collect::<SmallVec<[_; 512]>>();
